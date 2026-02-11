@@ -60,8 +60,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // Periodic cache cleanup (every 6 hours)
-chrome.alarms.create("cache-cleanup", { periodInMinutes: 360 });
-chrome.alarms.onAlarm.addListener(async (alarm) => {
+chrome.alarms?.create("cache-cleanup", { periodInMinutes: 360 });
+chrome.alarms?.onAlarm.addListener(async (alarm) => {
   if (alarm.name === "cache-cleanup") {
     try {
       const DB_NAME = "rugmunch_cache";
@@ -221,10 +221,8 @@ async function syncTier(): Promise<void> {
 syncTier();
 
 // Sync every 30 minutes
-chrome.alarms.create("tier-sync", { periodInMinutes: 30 });
-
-// Hook into existing alarm listener — add tier-sync case
-chrome.alarms.onAlarm.addListener(async (alarm) => {
+chrome.alarms?.create("tier-sync", { periodInMinutes: 30 });
+chrome.alarms?.onAlarm.addListener(async (alarm) => {
   if (alarm.name === "tier-sync") {
     await syncTier();
   }

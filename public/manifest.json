@@ -13,7 +13,8 @@
     "storage",
     "activeTab",
     "sidePanel",
-    "contextMenus"
+    "contextMenus",
+    "alarms"
   ],
   "host_permissions": [
     "https://dexscreener.com/*",
@@ -41,43 +42,75 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://dexscreener.com/*"],
-      "js": ["src/content/dexscreener.tsx"],
+      "matches": [
+        "https://dexscreener.com/*"
+      ],
+      "js": [
+        "src/content/dexscreener.tsx"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://pump.fun/*"],
-      "js": ["src/content/pumpfun.tsx"],
+      "matches": [
+        "https://pump.fun/*"
+      ],
+      "js": [
+        "src/content/pumpfun.tsx"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://jup.ag/*"],
-      "js": ["src/content/jupiter.tsx"],
+      "matches": [
+        "https://jup.ag/*"
+      ],
+      "js": [
+        "src/content/jupiter.tsx"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://gmgn.ai/*"],
-      "js": ["src/content/gmgn.tsx"],
+      "matches": [
+        "https://gmgn.ai/*"
+      ],
+      "js": [
+        "src/content/gmgn.tsx"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://bullx.io/*"],
-      "js": ["src/content/bullx.tsx"],
+      "matches": [
+        "https://bullx.io/*"
+      ],
+      "js": [
+        "src/content/bullx.tsx"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://birdeye.so/*"],
-      "js": ["src/content/birdeye.tsx"],
+      "matches": [
+        "https://birdeye.so/*"
+      ],
+      "js": [
+        "src/content/birdeye.tsx"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://raydium.io/*"],
-      "js": ["src/content/raydium.tsx"],
+      "matches": [
+        "https://raydium.io/*"
+      ],
+      "js": [
+        "src/content/raydium.tsx"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://photon-sol.tinyastro.io/*"],
-      "js": ["src/content/photon.tsx"],
+      "matches": [
+        "https://photon-sol.tinyastro.io/*"
+      ],
+      "js": [
+        "src/content/photon.tsx"
+      ],
       "run_at": "document_idle"
     }
   ],
@@ -86,8 +119,12 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["icons/*"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "icons/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ],
   "content_security_policy": {
