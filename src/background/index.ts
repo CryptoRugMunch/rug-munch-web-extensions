@@ -126,4 +126,82 @@ chrome.contextMenus?.onClicked?.addListener((info, tab) => {
   }
 });
 
+
+// ─── Tier Sync ──────────────────────────────────────────────────
+// Auto-check entitlements on startup, every 30 min, and after link
+
+const API_BASE_KEY = "api_base";
+const DEFAULT_API_BASE = "https://cryptorugmunch.ngrok.app/api";
+
+async function getApiBase(): Promise<string> {
+  try {
+    const result = await chrome.storage.local.get([API_BASE_KEY]);
+    return result[API_BASE_KEY] || DEFAULT_API_BASE;
+  } catch {
+    return DEFAULT_API_BASE;
+  }
+}
+
+async function syncTier(): Promise<void> {
+  try {
+    const data = await chrome.storage.local.get(["auth_token", "tier"]);
+    const token = data.auth_token;
+    if (!token) return; // Not signed in
+
+    const base = await getApiBase();
+
+    // Try /api/ext/me first (wallet auth users)
+    let resp = await fetch(`${base}/ext/me`, {
+      headers: { "Authorization": `Bearer ${token}` },
+    });
+
+    if (resp.ok) {
+      const user = await resp.json();
+      if (user.tier && user.tier !== data.tier) {
+        console.log(`[RMS] Tier sync: ${data.tier} → ${user.tier}`);
+        await chrome.storage.local.set({ tier: user.tier });
+      }
+      return;
+    }
+
+    // Fallback: check extension_links via a lightweight endpoint
+    // If /me fails (404 = wallet-only user), check linked telegram tier
+    const resp2 = await fetch(`${base}/ext/tier`, {
+      headers: { "Authorization": `Bearer ${token}` },
+    });
+
+    if (resp2.ok) {
+      const result = await resp2.json();
+      if (result.tier && result.tier !== data.tier) {
+        console.log(`[RMS] Tier sync (link): ${data.tier} → ${result.tier}`);
+        await chrome.storage.local.set({ tier: result.tier });
+      }
+    }
+  } catch (e) {
+    console.debug("[RMS] Tier sync failed (non-critical):", e);
+  }
+}
+
+// Sync on startup
+syncTier();
+
+// Sync every 30 minutes
+chrome.alarms.create("tier-sync", { periodInMinutes: 30 });
+
+// Hook into existing alarm listener — add tier-sync case
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === "tier-sync") {
+    await syncTier();
+  }
+});
+
+// Sync when auth_token changes (e.g. after linking)
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && (changes.auth_token || changes.linked_telegram)) {
+    // Small delay to let the token settle
+    setTimeout(() => syncTier(), 1000);
+  }
+});
+
+
 export {};
