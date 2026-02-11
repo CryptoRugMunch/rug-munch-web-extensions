@@ -49,7 +49,7 @@ export interface BatchScanResponse {
 // Rate limit tracking
 let requestCount = 0;
 let windowStart = Date.now();
-const RATE_WINDOW_MS = 3600_000; // 1 hour
+const RATE_WINDOW_MS = 86_400_000; // 24 hours (per day)
 
 function checkRateLimit(limit: number): boolean {
   const now = Date.now();
@@ -73,12 +73,14 @@ async function getTierLimit(): Promise<number> {
   try {
     const result = await chrome.storage.local.get(["tier"]);
     const tier = result.tier || "free";
-    switch (tier) {
-      case "vip": return 999999;
-      case "holder": return 100;
-      case "free_linked": return 30;
-      default: return 10;
-    }
+    // Mirrors config.py TIER_LIMITS.scans_per_day
+    const limits: Record<string, number> = {
+      free: 3, free_linked: 3,
+      holder: 15, scout: 30,
+      whale: 999999, analyst: 999999,
+      syndicate: 999999, og: 999999, vip: 999999,
+    };
+    return limits[tier] || 3;
   } catch {
     return 10;
   }
@@ -87,7 +89,7 @@ async function getTierLimit(): Promise<number> {
 export async function scanToken(mint: string, chain = "solana"): Promise<ExtScanResponse> {
   const limit = await getTierLimit();
   if (!checkRateLimit(limit)) {
-    return { success: false, cached: false, error: `Rate limit reached (${limit}/hr). Link Telegram or hold $CRM for more.` };
+    return { success: false, cached: false, error: `Rate limit reached (${limit}/day). Upgrade your tier for more scans.` };
   }
 
   try {

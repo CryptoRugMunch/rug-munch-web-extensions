@@ -24,14 +24,12 @@ interface ChatMessage {
   scanResult?: ScanResult;
 }
 
-// Tier-based rate limits (match Telegram)
-const TIER_MSG_LIMITS: Record<string, number> = {
-  free: 10,
-  free_linked: 30,
-  holder: 100,
-  whale: 200,
-  vip: 999999,
-  og: 999999,
+// Tier-based rate limits (per day — mirrors config.py)
+const TIER_SCAN_LIMITS: Record<string, number> = {
+  free: 3, free_linked: 3,
+  holder: 15, scout: 30,
+  whale: 999999, analyst: 999999,
+  syndicate: 999999, og: 999999, vip: 999999,
 };
 
 const SidePanel: React.FC = () => {
@@ -46,7 +44,7 @@ const SidePanel: React.FC = () => {
   const [lastScanResult, setLastScanResult] = useState<ScanResult | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const msgLimit = TIER_MSG_LIMITS[tier] || 10;
+  const msgLimit = TIER_SCAN_LIMITS[tier] || 3; // Side panel uses scan limits
 
   // Load state
   useEffect(() => {
@@ -114,7 +112,7 @@ const SidePanel: React.FC = () => {
     if (!text || loading) return;
 
     if (msgCount >= msgLimit) {
-      addMessage("system", `⏳ Rate limit reached (${msgLimit}/hr for ${tier} tier). ${tier === "free" || tier === "free_linked" ? "Upgrade for more." : "Take a breath — even Stoics rest."}`);
+      addMessage("system", `⏳ Rate limit reached (${msgLimit}/day for ${tier} tier). ${tier === "free" || tier === "free_linked" ? "Upgrade your tier for more scans." : "Take a breath — even Stoics rest."}`);
       return;
     }
 
@@ -265,7 +263,7 @@ const SidePanel: React.FC = () => {
           marginLeft: 4,
         }}>{tier}</span>
         <span style={{ fontSize: 10, color: COLORS.textMuted, marginLeft: "auto" }}>
-          {msgCount}/{msgLimit === 999999 ? "∞" : msgLimit}
+          {msgCount}/{msgLimit >= 999999 ? "∞" : msgLimit + "/day"}
         </span>
       </div>
 
