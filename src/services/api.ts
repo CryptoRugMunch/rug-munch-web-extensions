@@ -195,3 +195,52 @@ async function cacheScan(mint: string, data: ScanResult): Promise<void> {
     tx.objectStore(STORE_NAME).put({ mint, data, timestamp: Date.now() });
   } catch {}
 }
+
+// ─── Auto-Link Flow ────────────────────────────────────────────
+
+export interface LinkInitResponse {
+  link_token: string;
+  bot_url: string;
+  expires_in: number;
+}
+
+export interface LinkStatusResponse {
+  status: "pending" | "verified" | "expired";
+  telegram_id?: number;
+  telegram_username?: string;
+  tier?: string;
+  auth_token?: string;
+}
+
+/**
+ * Init auto-link: extension gets a token, opens bot deep link,
+ * then polls status until bot confirms.
+ */
+export async function initLink(extensionId?: string): Promise<LinkInitResponse | null> {
+  try {
+    const baseUrl = await getApiBaseUrl();
+    const resp = await fetch(`${baseUrl}/ext/link/init`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ extension_id: extensionId || "" }),
+    });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Poll link status. Returns "pending", "verified" (with creds), or "expired".
+ */
+export async function checkLinkStatus(token: string): Promise<LinkStatusResponse> {
+  try {
+    const baseUrl = await getApiBaseUrl();
+    const resp = await fetch(`${baseUrl}/ext/link/status/${token}`);
+    if (!resp.ok) return { status: "expired" };
+    return await resp.json();
+  } catch {
+    return { status: "expired" };
+  }
+}

@@ -1,8 +1,15 @@
 /**
  * Settings — Account (wallet + Telegram), multi-wallet, scanning prefs.
+ *
+ * Telegram link uses auto-verify flow:
+ * 1. Extension calls /link/init → gets link_token
+ * 2. Opens https://t.me/rug_munchy_bot?start=link_{token}
+ * 3. User taps Start in Telegram → bot auto-verifies
+ * 4. Extension polls /link/status/{token} → gets auth creds
+ * Zero manual code paste.
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { COLORS } from "../utils/designTokens";
 import {
   getSettings, updateSettings, type ExtensionSettings,
@@ -13,21 +20,25 @@ import {
   listWallets, addWallet, removeWallet,
   type WalletInfo,
 } from "../services/walletAuth";
+import { initLink, checkLinkStatus } from "../services/api";
 
 interface SettingsProps {
   onBack: () => void;
 }
+
+const POLL_INTERVAL = 2500; // 2.5s
+const POLL_TIMEOUT = 600_000; // 10 min (matches token TTL)
 
 const Settings: React.FC<SettingsProps> = ({ onBack }) => {
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
   const [account, setAccount] = useState<AccountState | null>(null);
   const [wallets, setWallets] = useState<WalletInfo[]>([]);
 
-  // Telegram linking state
-  const [linkLoading, setLinkLoading] = useState(false);
-  const [linkInput, setLinkInput] = useState("");
+  // Telegram auto-link state
+  const [linkPhase, setLinkPhase] = useState<"idle" | "waiting" | "success" | "error">("idle");
   const [linkError, setLinkError] = useState<string | null>(null);
-  const [linkSuccess, setLinkSuccess] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollStartRef = useRef<number>(0);
 
   // Wallet auth state
   const [walletLoading, setWalletLoading] = useState(false);
@@ -39,6 +50,9 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
   const [addWalletLabel, setAddWalletLabel] = useState("");
   const [showAddWallet, setShowAddWallet] = useState(false);
 
+  // Auth tab
+  const [authTab, setAuthTab] = useState<"wallet" | "telegram">("wallet");
+
   const isLoggedIn = !!(account?.authToken || account?.telegramId);
 
   useEffect(() => {
@@ -46,10 +60,17 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
     getAccount().then(setAccount);
   }, []);
 
+  // Clean up polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
+
   // Load wallets when logged in
   useEffect(() => {
     if (isLoggedIn) {
-      listWallets().then(setWallets);
+      listWallets().then(setWallets).catch(() => {});
     }
   }, [isLoggedIn]);
 
@@ -69,7 +90,6 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
     setWalletLoading(true);
     setWalletError(null);
 
-    // 1. Get challenge
     const challenge = await getChallenge();
     if (!challenge) {
       setWalletError("Couldn't connect to API");
@@ -77,9 +97,6 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
       return;
     }
 
-    // 2. For now: simplified auth (no signing, just address verification)
-    // Full signing flow needs window.solana which isn't accessible from popup
-    // TODO: Content script relay for wallet signing
     const result = await verifyWalletSignature(addr, "extension-auth", challenge.nonce);
 
     if (result.success) {
@@ -95,8 +112,7 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
         tier: result.tier, auth_token: result.authToken,
       });
       setWalletInput("");
-      // Refresh wallets
-      listWallets().then(setWallets);
+      listWallets().then(setWallets).catch(() => {});
     } else {
       setWalletError(result.error || "Authentication failed");
     }
@@ -104,53 +120,75 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
     setWalletLoading(false);
   }, [walletInput, account]);
 
-  // ─── Telegram Linking ─────────────────────────────────────────
-  const openBotLink = useCallback(() => {
-    chrome.tabs.create({ url: "https://t.me/rug_munchy_bot?start=link_extension" });
-  }, []);
-
-  const verifyCode = useCallback(async () => {
-    if (!linkInput || linkInput.length !== 6) return;
-    setLinkLoading(true);
+  // ─── Telegram Auto-Link ───────────────────────────────────────
+  const startAutoLink = useCallback(async () => {
+    setLinkPhase("waiting");
     setLinkError(null);
 
-    try {
-      const apiBase = settings.apiBase;
-      const resp = await fetch(`${apiBase}/ext/link/verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: linkInput, extension_id: chrome.runtime.id }),
-      });
+    // 1. Get link token from API
+    const extensionId = typeof chrome !== "undefined" ? chrome.runtime?.id || "" : "";
+    const init = await initLink(extensionId);
+    if (!init) {
+      setLinkPhase("error");
+      setLinkError("Couldn't connect to API. Is the service running?");
+      return;
+    }
 
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        setLinkError(err.detail || `Error: ${resp.status}`);
+    // 2. Open bot deep link in a new tab
+    chrome.tabs.create({ url: init.bot_url });
+
+    // 3. Start polling for verification
+    pollStartRef.current = Date.now();
+    if (pollRef.current) clearInterval(pollRef.current);
+
+    pollRef.current = setInterval(async () => {
+      // Timeout check
+      if (Date.now() - pollStartRef.current > POLL_TIMEOUT) {
+        if (pollRef.current) clearInterval(pollRef.current);
+        pollRef.current = null;
+        setLinkPhase("error");
+        setLinkError("Link expired. Please try again.");
         return;
       }
 
-      const data = await resp.json();
-      const updated = await updateAccount({
-        tier: data.tier || "free_linked",
-        telegramId: data.telegram_id,
-        telegramUsername: data.telegram_username || null,
-        linkedAt: new Date().toISOString(),
-        authToken: data.auth_token || account?.authToken || null,
-      });
-      setAccount(updated);
-      chrome.storage.local.set({
-        tier: data.tier || "free_linked",
-        linked_telegram: data.telegram_id,
-        auth_token: data.auth_token || account?.authToken || null,
-      });
-      setLinkInput("");
-      setLinkSuccess(true);
-      setTimeout(() => setLinkSuccess(false), 5000);
-    } catch (e: any) {
-      setLinkError(e.message || "Connection failed");
-    } finally {
-      setLinkLoading(false);
-    }
-  }, [linkInput, settings, account]);
+      const status = await checkLinkStatus(init.link_token);
+
+      if (status.status === "verified") {
+        // Success!
+        if (pollRef.current) clearInterval(pollRef.current);
+        pollRef.current = null;
+
+        const updated = await updateAccount({
+          tier: status.tier as any || "free_linked",
+          telegramId: status.telegram_id || null,
+          telegramUsername: status.telegram_username || null,
+          linkedAt: new Date().toISOString(),
+          authToken: status.auth_token || account?.authToken || null,
+        });
+        setAccount(updated);
+        chrome.storage.local.set({
+          tier: status.tier || "free_linked",
+          linked_telegram: status.telegram_id,
+          auth_token: status.auth_token || "",
+        });
+        setLinkPhase("success");
+        setTimeout(() => setLinkPhase("idle"), 4000);
+      } else if (status.status === "expired") {
+        if (pollRef.current) clearInterval(pollRef.current);
+        pollRef.current = null;
+        setLinkPhase("error");
+        setLinkError("Link expired. Please try again.");
+      }
+      // "pending" → keep polling
+    }, POLL_INTERVAL);
+  }, [account]);
+
+  const cancelLink = useCallback(() => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = null;
+    setLinkPhase("idle");
+    setLinkError(null);
+  }, []);
 
   // ─── Add Wallet ───────────────────────────────────────────────
   const handleAddWallet = useCallback(async () => {
@@ -162,7 +200,7 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
       setAddWalletInput("");
       setAddWalletLabel("");
       setShowAddWallet(false);
-      listWallets().then(setWallets);
+      listWallets().then(setWallets).catch(() => {});
     } else {
       setWalletError(result.error || "Failed to add wallet");
     }
@@ -171,12 +209,13 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
   const handleRemoveWallet = useCallback(async (id: number) => {
     const result = await removeWallet(id);
     if (result.success) {
-      listWallets().then(setWallets);
+      listWallets().then(setWallets).catch(() => {});
     }
   }, []);
 
   // ─── Logout ───────────────────────────────────────────────────
   const logout = useCallback(async () => {
+    if (pollRef.current) clearInterval(pollRef.current);
     await updateAccount({
       tier: "free", telegramId: null, telegramUsername: null,
       linkedAt: null, authToken: null,
@@ -234,27 +273,12 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
               <div style={{ fontSize: 11, color: COLORS.textSecondary, marginBottom: 6 }}>
                 💡 Link Telegram for alerts and synced history
               </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                <input type="text" placeholder="6-digit code" value={linkInput}
-                  onChange={(e) => setLinkInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                  maxLength={6} style={{
-                    flex: 1, padding: "6px 8px", borderRadius: 6,
-                    backgroundColor: COLORS.bg, border: `1px solid ${COLORS.border}`,
-                    color: COLORS.textPrimary, fontSize: 14, fontFamily: "monospace",
-                    letterSpacing: "3px", textAlign: "center", outline: "none",
-                  }} />
-                <button onClick={verifyCode} disabled={linkInput.length !== 6}
-                  style={{
-                    padding: "6px 10px", borderRadius: 6,
-                    backgroundColor: linkInput.length === 6 ? COLORS.purple : COLORS.border,
-                    color: "#fff", border: "none", fontSize: 11, fontWeight: 600,
-                    cursor: linkInput.length === 6 ? "pointer" : "default",
-                  }}>Link</button>
-              </div>
-              <button onClick={openBotLink} style={{
-                marginTop: 4, background: "none", border: "none",
-                color: COLORS.cyan, fontSize: 10, cursor: "pointer",
-              }}>Get code from @rug_munchy_bot →</button>
+              <TelegramLinkButton
+                phase={linkPhase}
+                error={linkError}
+                onStart={startAutoLink}
+                onCancel={cancelLink}
+              />
             </div>
           )}
         </Section>
@@ -262,82 +286,58 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
         <Section title="Sign In">
           {/* Tab switcher */}
           <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
-            <TabButton label="🔑 Wallet" active />
-            <TabButton label="📱 Telegram" />
+            <TabButton label="🔑 Wallet" active={authTab === "wallet"} onClick={() => setAuthTab("wallet")} />
+            <TabButton label="📱 Telegram" active={authTab === "telegram"} onClick={() => setAuthTab("telegram")} />
           </div>
 
-          {/* Wallet Auth */}
-          <div style={{ padding: 12, borderRadius: 8, backgroundColor: COLORS.bgCard, marginBottom: 8 }}>
-            <p style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 8 }}>
-              Sign in with your Solana wallet address. No Telegram needed.
-            </p>
-            <input type="text" placeholder="Your Solana wallet address..."
-              value={walletInput}
-              onChange={(e) => { setWalletInput(e.target.value); setWalletError(null); }}
-              style={{
-                width: "100%", padding: "8px 10px", borderRadius: 6,
-                backgroundColor: COLORS.bg, border: `1px solid ${COLORS.border}`,
-                color: COLORS.textPrimary, fontSize: 11, fontFamily: "monospace",
-                outline: "none", marginBottom: 6, boxSizing: "border-box",
-              }} />
-            <button onClick={handleWalletAuth} disabled={walletLoading || walletInput.length < 32}
-              style={{
-                width: "100%", padding: "8px 0", borderRadius: 6,
-                backgroundColor: walletInput.length >= 32 ? COLORS.purple : COLORS.border,
-                color: "#fff", border: "none", fontSize: 12, fontWeight: 600,
-                cursor: walletInput.length >= 32 ? "pointer" : "default",
-              }}>
-              {walletLoading ? "Connecting..." : "Sign In with Wallet"}
-            </button>
-            {walletError && (
-              <div style={{ marginTop: 6, color: COLORS.red, fontSize: 11 }}>❌ {walletError}</div>
-            )}
-            <div style={{ marginTop: 8, fontSize: 10, color: COLORS.textMuted }}>
-              💡 $CRM holders get 100 scans/hr automatically detected
-            </div>
-          </div>
-
-          {/* Telegram Alt */}
-          <div style={{ padding: 12, borderRadius: 8, backgroundColor: COLORS.bgCard }}>
-            <p style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 8 }}>
-              Or link your Telegram for alerts + synced scan history.
-            </p>
-            <div style={{
-              padding: 8, borderRadius: 6, marginBottom: 6,
-              backgroundColor: `${COLORS.purple}10`, fontSize: 11, color: COLORS.textSecondary,
-            }}>
-              <strong style={{ color: COLORS.textPrimary }}>Step 1:</strong> Get code from bot
-              <button onClick={openBotLink} style={{
-                display: "block", width: "100%", marginTop: 4,
-                padding: "5px 0", borderRadius: 6,
-                backgroundColor: COLORS.purple, border: "none",
-                color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer",
-              }}>🤖 Open @rug_munchy_bot</button>
-            </div>
-            <div style={{ fontSize: 11, color: COLORS.textSecondary, marginBottom: 4 }}>
-              <strong style={{ color: COLORS.textPrimary }}>Step 2:</strong> Paste code
-            </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <input type="text" placeholder="000000" value={linkInput}
-                onChange={(e) => { setLinkInput(e.target.value.replace(/\D/g, "").slice(0, 6)); setLinkError(null); }}
-                maxLength={6} style={{
-                  flex: 1, padding: "7px", borderRadius: 6,
-                  backgroundColor: COLORS.bg, border: `1px solid ${COLORS.border}`,
-                  color: COLORS.textPrimary, fontSize: 16, fontFamily: "monospace",
-                  letterSpacing: "4px", textAlign: "center", outline: "none",
-                }} />
-              <button onClick={verifyCode} disabled={linkInput.length !== 6 || linkLoading}
+          {authTab === "wallet" ? (
+            /* Wallet Auth */
+            <div style={{ padding: 12, borderRadius: 8, backgroundColor: COLORS.bgCard, marginBottom: 8 }}>
+              <p style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 8 }}>
+                Sign in with your Solana wallet address. No Telegram needed.
+              </p>
+              <input type="text" placeholder="Your Solana wallet address..."
+                value={walletInput}
+                onChange={(e) => { setWalletInput(e.target.value); setWalletError(null); }}
                 style={{
-                  padding: "7px 12px", borderRadius: 6,
-                  backgroundColor: linkInput.length === 6 ? COLORS.cyan : COLORS.border,
-                  color: linkInput.length === 6 ? COLORS.bg : COLORS.textMuted,
-                  border: "none", fontSize: 11, fontWeight: 600,
-                  cursor: linkInput.length === 6 ? "pointer" : "default",
-                }}>{linkLoading ? "..." : "Verify"}</button>
+                  width: "100%", padding: "8px 10px", borderRadius: 6,
+                  backgroundColor: COLORS.bg, border: `1px solid ${COLORS.border}`,
+                  color: COLORS.textPrimary, fontSize: 11, fontFamily: "monospace",
+                  outline: "none", marginBottom: 6, boxSizing: "border-box",
+                }} />
+              <button onClick={handleWalletAuth} disabled={walletLoading || walletInput.length < 32}
+                style={{
+                  width: "100%", padding: "8px 0", borderRadius: 6,
+                  backgroundColor: walletInput.length >= 32 ? COLORS.purple : COLORS.border,
+                  color: "#fff", border: "none", fontSize: 12, fontWeight: 600,
+                  cursor: walletInput.length >= 32 ? "pointer" : "default",
+                }}>
+                {walletLoading ? "Connecting..." : "Sign In with Wallet"}
+              </button>
+              {walletError && (
+                <div style={{ marginTop: 6, color: COLORS.red, fontSize: 11 }}>❌ {walletError}</div>
+              )}
+              <div style={{ marginTop: 8, fontSize: 10, color: COLORS.textMuted }}>
+                💡 $CRM holders get 100 scans/hr automatically detected
+              </div>
             </div>
-            {linkError && <div style={{ marginTop: 4, color: COLORS.red, fontSize: 11 }}>❌ {linkError}</div>}
-            {linkSuccess && <div style={{ marginTop: 4, color: COLORS.green, fontSize: 11 }}>✅ Linked!</div>}
-          </div>
+          ) : (
+            /* Telegram Auto-Link */
+            <div style={{ padding: 12, borderRadius: 8, backgroundColor: COLORS.bgCard, marginBottom: 8 }}>
+              <p style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 10 }}>
+                Link your Telegram account for alerts, synced history, and higher scan limits.
+              </p>
+              <TelegramLinkButton
+                phase={linkPhase}
+                error={linkError}
+                onStart={startAutoLink}
+                onCancel={cancelLink}
+              />
+              <div style={{ marginTop: 8, fontSize: 10, color: COLORS.textMuted }}>
+                Opens @rug_munchy_bot in Telegram. Just tap <b>Start</b> — we'll detect it automatically.
+              </div>
+            </div>
+          )}
 
           {/* No-account note */}
           <div style={{
@@ -449,6 +449,107 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
       }}>
         Rug Munch Intelligence v{chrome.runtime.getManifest().version} • 🗿
       </div>
+    </div>
+  );
+};
+
+// ─── Telegram Auto-Link Button ──────────────────────────────────
+
+const TelegramLinkButton: React.FC<{
+  phase: "idle" | "waiting" | "success" | "error";
+  error: string | null;
+  onStart: () => void;
+  onCancel: () => void;
+}> = ({ phase, error, onStart, onCancel }) => {
+  if (phase === "success") {
+    return (
+      <div style={{
+        padding: 10, borderRadius: 8, textAlign: "center",
+        backgroundColor: `${COLORS.green}15`, border: `1px solid ${COLORS.green}30`,
+      }}>
+        <div style={{ fontSize: 20, marginBottom: 4 }}>✅</div>
+        <div style={{ fontSize: 12, color: COLORS.green, fontWeight: 600 }}>
+          Telegram Linked!
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === "waiting") {
+    return (
+      <div style={{ textAlign: "center" }}>
+        <div style={{
+          padding: 12, borderRadius: 8,
+          backgroundColor: `${COLORS.purple}10`, border: `1px solid ${COLORS.purple}30`,
+        }}>
+          <div style={{ marginBottom: 8 }}>
+            <PulsingDot />
+          </div>
+          <div style={{ fontSize: 12, color: COLORS.textPrimary, fontWeight: 600, marginBottom: 2 }}>
+            Waiting for Telegram...
+          </div>
+          <div style={{ fontSize: 10, color: COLORS.textSecondary }}>
+            Tap <b>Start</b> in the Telegram chat that just opened
+          </div>
+        </div>
+        <button onClick={onCancel} style={{
+          marginTop: 6, background: "none", border: "none",
+          color: COLORS.textMuted, fontSize: 10, cursor: "pointer",
+          textDecoration: "underline",
+        }}>Cancel</button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <button onClick={onStart} style={{
+        width: "100%", padding: "10px 0", borderRadius: 8,
+        backgroundColor: COLORS.cyan, color: COLORS.bg,
+        border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer",
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+      }}>
+        📱 Link Telegram Account
+      </button>
+      {phase === "error" && error && (
+        <div style={{ marginTop: 6, color: COLORS.red, fontSize: 11, textAlign: "center" }}>
+          ❌ {error}
+          <button onClick={onStart} style={{
+            marginLeft: 6, background: "none", border: "none",
+            color: COLORS.cyan, fontSize: 11, cursor: "pointer",
+            textDecoration: "underline",
+          }}>Retry</button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── Pulsing Dot Animation ──────────────────────────────────────
+
+const PulsingDot: React.FC = () => {
+  const [opacity, setOpacity] = useState(1);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setOpacity((prev) => (prev === 1 ? 0.3 : 1));
+    }, 800);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div style={{
+      display: "inline-flex", alignItems: "center", gap: 6,
+    }}>
+      {[0, 1, 2].map((i) => (
+        <div key={i} style={{
+          width: 8, height: 8, borderRadius: 4,
+          backgroundColor: COLORS.purple,
+          opacity: opacity,
+          transition: "opacity 0.6s ease",
+          transitionDelay: `${i * 200}ms`,
+        }} />
+      ))}
     </div>
   );
 };
