@@ -2,6 +2,10 @@
  * Shared auto-link hook — used by both Popup and Settings.
  *
  * Flow: initLink() → open bot deep link → poll status → verified
+ *
+ * FIXED: Server now returns the SAME auth_token from extension_users
+ * when cross-linking, so we don't lose wallet auth on TG link.
+ * Added fallback: keep existing auth_token if server returns empty.
  */
 
 import { useState, useRef, useCallback, useEffect } from "react";
@@ -58,18 +62,26 @@ export function useAutoLink() {
         if (pollRef.current) clearInterval(pollRef.current);
         pollRef.current = null;
 
+        // Get existing account — preserve wallet auth_token if server didn't return one
         const acct = await getAccount();
+        const existingToken = acct?.authToken || 
+          (await chrome.storage.local.get("auth_token")).auth_token || "";
+        
+        // Server returns the existing extension_users auth_token when cross-linking,
+        // so it should match. But keep existing as fallback.
+        const resolvedToken = status.auth_token || existingToken;
+
         await updateAccount({
           tier: status.tier as any || "free_linked",
           telegramId: status.telegram_id || null,
           telegramUsername: status.telegram_username || null,
           linkedAt: new Date().toISOString(),
-          authToken: status.auth_token || acct?.authToken || null,
+          authToken: resolvedToken,
         });
         chrome.storage.local.set({
           tier: status.tier || "free_linked",
           linked_telegram: status.telegram_id,
-          auth_token: status.auth_token || "",
+          auth_token: resolvedToken,
         });
         setPhase("success");
         setTimeout(() => setPhase("idle"), 4000);
