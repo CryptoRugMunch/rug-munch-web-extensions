@@ -13,7 +13,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import Settings from "./Settings";
 import Onboarding from "./Onboarding";
-import { scanToken, type ScanResult } from "../services/api";
+import { scanToken, type ScanResult, type ExtScanResponse } from "../services/api";
 import { riskColor, riskLabel, riskEmoji, COLORS } from "../utils/designTokens";
 import { extractMintFromUrl } from "../utils/shadowInject";
 
@@ -23,6 +23,7 @@ const Popup: React.FC = () => {
   const [input, setInput] = useState("");
   const [scanning, setScanning] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
+  const [notScanned, setNotScanned] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tier, setTier] = useState("free");
   const [scanCount, setScanCount] = useState(0);
@@ -52,7 +53,6 @@ const Popup: React.FC = () => {
       if (data.pending_scan) {
         setInput(data.pending_scan);
         chrome.storage.local.remove("pending_scan");
-        // Auto-trigger scan
         setTimeout(() => {
           const scanBtn = document.querySelector("[data-scan-btn]") as HTMLButtonElement;
           scanBtn?.click();
@@ -82,10 +82,16 @@ const Popup: React.FC = () => {
     setScanning(true);
     setError(null);
     setResult(null);
+    setNotScanned(false);
 
-    const resp = await scanToken(mint);
+    const resp: ExtScanResponse = await scanToken(mint);
     if (resp.success && resp.data) {
-      setResult(resp.data);
+      // Check if the API returned real data vs "not_scanned" placeholder
+      if ((resp.data as any).not_scanned && resp.data.risk_score == null) {
+        setNotScanned(true);
+      } else {
+        setResult(resp.data);
+      }
       setScanCount((c) => c + 1);
       chrome.storage.local.set({ scan_count: scanCount + 1 });
     } else {
@@ -96,9 +102,9 @@ const Popup: React.FC = () => {
 
   const tierLabel = {
     free: "Free (10/hr)",
-    free_linked: "Free Linked (30/hr)",
-    holder: "$CRM Holder (100/hr)",
-    vip: "VIP (Unlimited)",
+    free_linked: "Linked (30/hr)",
+    holder: "$CRM (100/hr)",
+    vip: "VIP ∞",
   }[tier] || "Free";
 
   if (view === "onboarding") {
@@ -169,6 +175,7 @@ const Popup: React.FC = () => {
             }}
           />
           <button
+            data-scan-btn
             onClick={handleScan}
             disabled={scanning}
             style={{
@@ -179,7 +186,7 @@ const Popup: React.FC = () => {
               transition: "all 0.2s",
             }}
           >
-            {scanning ? "..." : "Scan"}
+            {scanning ? "Scanning..." : "Scan"}
           </button>
         </div>
         {activeTabMint && input === activeTabMint && (
@@ -188,6 +195,22 @@ const Popup: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Scanning animation */}
+      {scanning && (
+        <div style={{
+          padding: 24, textAlign: "center",
+          borderRadius: 10, backgroundColor: COLORS.bgCard,
+          border: `1px solid ${COLORS.border}`,
+        }}>
+          <div style={{ fontSize: 28, marginBottom: 8, animation: "pulse 1.5s infinite" }}>🔍</div>
+          <div style={{ fontSize: 13, color: COLORS.textSecondary }}>Analyzing token...</div>
+          <div style={{ fontSize: 10, color: COLORS.textMuted, marginTop: 4 }}>
+            First scans take 5-15s. Cached results are instant.
+          </div>
+          <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }`}</style>
+        </div>
+      )}
 
       {/* Error */}
       {error && (
@@ -200,8 +223,43 @@ const Popup: React.FC = () => {
         </div>
       )}
 
+      {/* Not scanned / scan failed state */}
+      {notScanned && !scanning && (
+        <div style={{
+          padding: 16, textAlign: "center",
+          borderRadius: 10, backgroundColor: COLORS.bgCard,
+          border: `1px solid ${COLORS.border}`,
+        }}>
+          <div style={{ fontSize: 28, marginBottom: 8 }}>❓</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.textPrimary, marginBottom: 4 }}>
+            Token Not Found
+          </div>
+          <div style={{ fontSize: 11, color: COLORS.textSecondary, marginBottom: 12 }}>
+            This token hasn't been scanned yet or couldn't be analyzed.
+          </div>
+          <button
+            onClick={() => {
+              window.open(`https://t.me/rug_munchy_bot?start=scan_${input.trim()}`, "_blank");
+            }}
+            style={{
+              padding: "6px 14px", borderRadius: 6,
+              backgroundColor: `${COLORS.cyan}20`, border: `1px solid ${COLORS.cyan}40`,
+              color: COLORS.cyan, fontSize: 11, cursor: "pointer",
+            }}
+          >
+            🤖 Scan via Telegram Bot
+          </button>
+          <div style={{
+            marginTop: 10, fontSize: 9, fontFamily: "monospace",
+            color: COLORS.textMuted, wordBreak: "break-all",
+          }}>
+            {input.trim()}
+          </div>
+        </div>
+      )}
+
       {/* Scan Result */}
-      {result && <ScanResultCard result={result} />}
+      {result && !scanning && <ScanResultCard result={result} />}
 
       {/* Footer */}
       <div style={{
@@ -231,15 +289,17 @@ const Popup: React.FC = () => {
 };
 
 const ScanResultCard: React.FC<{ result: ScanResult }> = ({ result }) => {
-  const color = riskColor(result.risk_score);
-  const label = riskLabel(result.risk_score);
-  const emoji = riskEmoji(result.risk_score);
+  const score = result.risk_score;
+  const color = riskColor(score);
+  const label = riskLabel(score);
+  const emoji = riskEmoji(score);
+  const hasData = score != null;
 
   return (
     <div style={{
       padding: 14, borderRadius: 10,
       backgroundColor: COLORS.bgCard,
-      border: `1px solid ${color}40`,
+      border: `1px solid ${hasData ? color : COLORS.border}40`,
     }}>
       {/* Token header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
@@ -252,45 +312,65 @@ const ScanResultCard: React.FC<{ result: ScanResult }> = ({ result }) => {
           </div>
         </div>
         <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 22, fontWeight: 800, color }}>{emoji} {result.risk_score}</div>
-          <div style={{ fontSize: 10, color }}>{label} Risk</div>
+          {hasData ? (
+            <>
+              <div style={{ fontSize: 22, fontWeight: 800, color }}>{emoji}</div>
+              <div style={{ fontSize: 10, color, fontWeight: 600 }}>{score}/100 — {label}</div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 22 }}>❓</div>
+              <div style={{ fontSize: 10, color: COLORS.textMuted }}>No score</div>
+            </>
+          )}
         </div>
       </div>
 
       {/* Risk bar */}
-      <div style={{
-        width: "100%", height: 6,
-        backgroundColor: COLORS.border, borderRadius: 3, marginBottom: 12,
-      }}>
+      {hasData && (
         <div style={{
-          width: `${result.risk_score}%`, height: "100%",
-          backgroundColor: color, borderRadius: 3,
-          transition: "width 0.5s",
-        }} />
-      </div>
+          width: "100%", height: 6,
+          backgroundColor: COLORS.border, borderRadius: 3, marginBottom: 12,
+        }}>
+          <div style={{
+            width: `${score}%`, height: "100%",
+            backgroundColor: color, borderRadius: 3,
+            transition: "width 0.5s",
+          }} />
+        </div>
+      )}
 
       {/* Metrics grid */}
       <div style={{
         display: "grid", gridTemplateColumns: "1fr 1fr",
         gap: 8, fontSize: 11,
       }}>
-        <MetricRow label="Price" value={`$${result.price_usd?.toFixed(6) || "—"}`} />
+        <MetricRow label="Price" value={result.price_usd ? `$${formatPrice(result.price_usd)}` : "—"} />
         <MetricRow label="Market Cap" value={formatUsd(result.market_cap)} />
         <MetricRow label="Liquidity" value={formatUsd(result.liquidity_usd)} />
-        <MetricRow label="Holders" value={result.holder_count?.toLocaleString() || "—"} />
-        <MetricRow label="Top 10 %" value={`${result.top_10_holder_percent?.toFixed(1) || "—"}%`} />
-        <MetricRow label="Age" value={result.created_at || "—"} />
+        <MetricRow label="Holders" value={result.holder_count ? result.holder_count.toLocaleString() : "—"} />
+        <MetricRow label="Top 10 %" value={result.top_10_holder_percent ? `${result.top_10_holder_percent.toFixed(1)}%` : "—"} />
+        <MetricRow label="Age" value={formatAge(result.created_at)} />
       </div>
 
       {/* Risk factors */}
-      {result.risk_factors?.length > 0 && (
+      {result.risk_factors && result.risk_factors.length > 0 && (
         <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${COLORS.border}` }}>
-          <div style={{ fontSize: 10, color: COLORS.textMuted, marginBottom: 4 }}>Risk Factors:</div>
-          {result.risk_factors.slice(0, 4).map((f, i) => (
-            <div key={i} style={{ fontSize: 11, color: COLORS.textSecondary, paddingLeft: 8 }}>
+          <div style={{ fontSize: 10, color: COLORS.textMuted, marginBottom: 4 }}>⚠️ Risk Factors:</div>
+          {result.risk_factors.slice(0, 5).map((f, i) => (
+            <div key={i} style={{ fontSize: 11, color: COLORS.orange, paddingLeft: 8 }}>
               • {f}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Live scan indicator */}
+      {(result as any).live_scanned && (
+        <div style={{
+          marginTop: 8, fontSize: 9, color: COLORS.cyan, textAlign: "center",
+        }}>
+          ⚡ Live scan — fresh data
         </div>
       )}
 
@@ -298,7 +378,7 @@ const ScanResultCard: React.FC<{ result: ScanResult }> = ({ result }) => {
       <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${COLORS.border}` }}>
         <button
           onClick={() => {
-            const shareText = `${emoji} $${result.token_symbol || "?"} Risk: ${result.risk_score}/100 (${label})\nPrice: $${result.price_usd?.toFixed(6) || "—"} | Liq: ${formatUsd(result.liquidity_usd)}\nScanned by Rug Munch 🗿 https://t.me/rug_munchy_bot`;
+            const shareText = `${emoji} $${result.token_symbol || "?"} Risk: ${score ?? "?"}/100 (${label})\nPrice: ${result.price_usd ? `$${formatPrice(result.price_usd)}` : "—"} | Liq: ${formatUsd(result.liquidity_usd)}\nScanned by Rug Munch 🗿 https://t.me/rug_munchy_bot`;
             navigator.clipboard.writeText(shareText);
           }}
           style={{
@@ -334,11 +414,35 @@ const MetricRow: React.FC<{ label: string; value: string }> = ({ label, value })
   </div>
 );
 
+function formatPrice(value: number): string {
+  if (value === 0) return "0";
+  if (value < 0.000001) return value.toExponential(2);
+  if (value < 0.01) return value.toFixed(8);
+  if (value < 1) return value.toFixed(4);
+  return value.toFixed(2);
+}
+
 function formatUsd(value: number | undefined): string {
   if (!value) return "—";
   if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
   return `$${value.toFixed(2)}`;
+}
+
+function formatAge(createdAt: string | undefined | null): string {
+  if (!createdAt) return "—";
+  try {
+    const created = new Date(createdAt);
+    const now = new Date();
+    const diffMs = now.getTime() - created.getTime();
+    const days = Math.floor(diffMs / 86400000);
+    if (days === 0) return "<1 day";
+    if (days < 30) return `${days}d`;
+    if (days < 365) return `${Math.floor(days / 30)}mo`;
+    return `${Math.floor(days / 365)}y`;
+  } catch {
+    return "—";
+  }
 }
 
 export default Popup;

@@ -54,7 +54,7 @@ async function injectRiskBadge() {
     }
 
     // If high risk, also inject a warning banner at the top
-    if (risk_score >= 65) {
+    if (risk_score != null && risk_score >= 65) {
       const mainContent = document.querySelector("main") || document.querySelector("#__next") || document.body;
       if (mainContent) {
         const banner = document.createElement("div");

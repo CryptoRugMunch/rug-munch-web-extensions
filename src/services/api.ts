@@ -18,17 +18,19 @@ async function getApiBaseUrl(): Promise<string> {
 export interface ScanResult {
   token_address: string;
   chain: string;
-  token_name: string;
-  token_symbol: string;
-  risk_score: number;
-  risk_label: string;
+  token_name: string | null;
+  token_symbol: string | null;
+  risk_score: number | null;
+  risk_label?: string;
   price_usd: number;
   liquidity_usd: number;
   market_cap: number;
   holder_count: number;
   top_10_holder_percent: number;
-  created_at: string;
-  risk_factors: string[];
+  created_at: string | null;
+  risk_factors?: string[];
+  not_scanned?: boolean;
+  live_scanned?: boolean;
 }
 
 export interface ExtScanResponse {
@@ -85,7 +87,7 @@ async function getTierLimit(): Promise<number> {
 export async function scanToken(mint: string, chain = "solana"): Promise<ExtScanResponse> {
   const limit = await getTierLimit();
   if (!checkRateLimit(limit)) {
-    return { success: false, cached: false, error: "Rate limit reached. Upgrade tier for more scans." };
+    return { success: false, cached: false, error: `Rate limit reached (${limit}/hr). Link Telegram or hold $CRM for more.` };
   }
 
   try {
@@ -99,7 +101,8 @@ export async function scanToken(mint: string, chain = "solana"): Promise<ExtScan
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
-    const resp = await fetch(`${await getApiBaseUrl()}/ext/scan`, {
+    const baseUrl = await getApiBaseUrl();
+    const resp = await fetch(`${baseUrl}/ext/scan`, {
       method: "POST",
       headers,
       body: JSON.stringify({ token_address: mint, chain }),
@@ -114,10 +117,13 @@ export async function scanToken(mint: string, chain = "solana"): Promise<ExtScan
       return { success: false, cached: false, error: err.detail || `HTTP ${resp.status}` };
     }
 
+    // The API returns the ScanResult directly (not wrapped)
     const data: ScanResult = await resp.json();
 
-    // Store in IndexedDB
-    await cacheScan(mint, data);
+    // Store in IndexedDB (only if we got real data)
+    if (!data.not_scanned) {
+      await cacheScan(mint, data);
+    }
 
     return { success: true, data, cached: false };
   } catch (e: any) {
@@ -134,7 +140,8 @@ export async function batchScan(mints: string[], chain = "solana"): Promise<Batc
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
-    const resp = await fetch(`${await getApiBaseUrl()}/ext/batch`, {
+    const baseUrl = await getApiBaseUrl();
+    const resp = await fetch(`${baseUrl}/ext/batch`, {
       method: "POST",
       headers,
       body: JSON.stringify({ tokens: mints, chain }),

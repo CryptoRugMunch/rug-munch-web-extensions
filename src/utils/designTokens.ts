@@ -37,23 +37,27 @@ export const RISK_COLORS = {
   moderate: COLORS.gold,   // 25-49
   high: COLORS.orange,     // 50-74
   critical: COLORS.red,    // 75-100
+  unknown: COLORS.textMuted, // null/not scanned
 } as const;
 
-export function riskColor(score: number): string {
+export function riskColor(score: number | null | undefined): string {
+  if (score == null) return RISK_COLORS.unknown;
   if (score >= 75) return RISK_COLORS.critical;
   if (score >= 50) return RISK_COLORS.high;
   if (score >= 25) return RISK_COLORS.moderate;
   return RISK_COLORS.low;
 }
 
-export function riskLabel(score: number): string {
+export function riskLabel(score: number | null | undefined): string {
+  if (score == null) return "Unknown";
   if (score >= 75) return "Critical";
   if (score >= 50) return "High";
   if (score >= 25) return "Moderate";
   return "Low";
 }
 
-export function riskEmoji(score: number): string {
+export function riskEmoji(score: number | null | undefined): string {
+  if (score == null) return "❓";
   if (score >= 75) return "🔴";
   if (score >= 50) return "🟠";
   if (score >= 25) return "🟡";

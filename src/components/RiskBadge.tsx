@@ -10,7 +10,7 @@ import React, { useState } from "react";
 import { riskColor, riskLabel, riskEmoji, COLORS } from "../utils/designTokens";
 
 interface RiskBadgeProps {
-  score: number;
+  score: number | null;
   symbol?: string;
   mint: string;
   compact?: boolean;
@@ -25,6 +25,7 @@ export const RiskBadge: React.FC<RiskBadgeProps> = ({
   onFullScan,
 }) => {
   const [expanded, setExpanded] = useState(false);
+  if (score == null) return null;
   const color = riskColor(score);
   const label = riskLabel(score);
   const emoji = riskEmoji(score);
