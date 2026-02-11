@@ -17,11 +17,12 @@ interface UpgradeProps {
 interface TierInfo {
   name: string;
   emoji: string;
-  access: "hold" | "subscribe";
+  access: "hold" | "subscribe" | "both";
   requirement?: string;
   features: string[];
-  prices?: { sol: number; usdc: number; stars_equiv: number };
-}
+  prices?: { sol: number; usdc: number; stars_equiv: number } | null;
+  crm_hold?: number;
+};
 
 interface PricingData {
   payment_wallet: string;
@@ -232,33 +233,33 @@ const Upgrade: React.FC<UpgradeProps> = ({ onBack, currentTier }) => {
         {tierOrder.map((key) => {
           const t = pricing.tiers[key];
           if (!t) return null;
-          const isHold = t.access === "hold";
+          const isHold = t.access === "hold" && !t.prices;
           const isCurrent = currentTier === key;
           const isSelected = selectedTier === key;
           const isUpgrade = tierOrder.indexOf(key) > currentRank;
 
           return (
-            <div key={key} onClick={() => !isHold && !isCurrent && setSelectedTier(key)}
+            <div key={key} onClick={() => !isCurrent && (t.prices || !isHold) && setSelectedTier(key)}
               style={{
                 padding: 10, borderRadius: 8, marginBottom: 6, backgroundColor: COLORS.bgCard,
                 border: `2px solid ${isCurrent ? COLORS.green : isSelected ? COLORS.purple : COLORS.border}`,
-                cursor: isHold || isCurrent ? "default" : "pointer",
+                cursor: isCurrent || (isHold && !t.prices) ? "default" : "pointer",
                 opacity: !isUpgrade && !isCurrent ? 0.5 : 1,
               }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                 <span style={{ fontSize: 13, fontWeight: 700 }}>{t.emoji} {t.name}</span>
                 <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                   {isCurrent && <span style={{ fontSize: 8, padding: "2px 5px", borderRadius: 4, backgroundColor: `${COLORS.green}20`, color: COLORS.green }}>CURRENT</span>}
-                  {isHold && <span style={{ fontSize: 8, padding: "2px 5px", borderRadius: 4, backgroundColor: `${COLORS.gold}15`, color: COLORS.gold }}>HOLD</span>}
-                  {!isHold && <span style={{ fontSize: 8, padding: "2px 5px", borderRadius: 4, backgroundColor: `${COLORS.cyan}15`, color: COLORS.cyan }}>SUB</span>}
+                  {t.crm_hold && <span style={{ fontSize: 8, padding: "2px 5px", borderRadius: 4, backgroundColor: `${COLORS.gold}15`, color: COLORS.gold }}>HOLD</span>}
+                  {t.prices && <span style={{ fontSize: 8, padding: "2px 5px", borderRadius: 4, backgroundColor: `${COLORS.cyan}15`, color: COLORS.cyan }}>SUB</span>}
                 </div>
               </div>
               <div style={{ fontSize: 9, color: COLORS.textMuted, lineHeight: 1.5 }}>
                 {t.features.slice(0, 3).map((f, i) => <span key={i}>✓ {f}{i < 2 ? " · " : ""}</span>)}
                 {t.features.length > 3 && <span> +{t.features.length - 3} more</span>}
               </div>
-              {isHold && t.requirement && (
-                <div style={{ fontSize: 9, color: COLORS.gold, marginTop: 3 }}>💎 {t.requirement}</div>
+              {t.crm_hold && (
+                <div style={{ fontSize: 9, color: COLORS.gold, marginTop: 3 }}>💎 Hold {(t.crm_hold! / 1000).toLocaleString()}K  {t.prices ? "or subscribe ↓" : "(invite only)"}</div>
               )}
               {t.prices && (
                 <div style={{ fontSize: 10, color: COLORS.cyan, marginTop: 3 }}>
@@ -271,7 +272,7 @@ const Upgrade: React.FC<UpgradeProps> = ({ onBack, currentTier }) => {
       </div>
 
       {/* Currency + Pay (only for subscription tiers) */}
-      {selectedTier && pricing.tiers[selectedTier]?.access === "subscribe" && (
+      {selectedTier && pricing.tiers[selectedTier]?.prices && (
         <>
           <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
             <CurrencyBtn label="◎ SOL" active={currency === "sol"} onClick={() => setCurrency("sol")} />

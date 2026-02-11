@@ -246,7 +246,7 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
                 <div style={{ marginTop: 6, color: COLORS.red, fontSize: 11 }}>❌ {walletError}</div>
               )}
               <div style={{ marginTop: 8, fontSize: 10, color: COLORS.textMuted }}>
-                💡 $CRM holders get 100 scans/hr automatically detected
+                💡 $CRM holders get auto-detected tier upgrades
               </div>
             </div>
           ) : (
