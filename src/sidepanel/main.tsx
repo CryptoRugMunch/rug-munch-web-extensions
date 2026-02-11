@@ -165,12 +165,8 @@ const SidePanel: React.FC = () => {
       } else {
         addMessage("marcus", `❓ Couldn't analyze that token. It may not exist yet or the scan service timed out. Try the full scan via Telegram: @rug_munchy_bot`);
       }
-    } else if (lastScanResult && (
-      lowerText.includes("deep") || lowerText.includes("more") ||
-      lowerText.includes("detail") || lowerText.includes("holder") ||
-      lowerText.includes("what else") || lowerText.includes("liquidity")
-    )) {
-      // Follow-up on last scan — provide more context from cached data
+    } else if (lastScanResult) {
+      // Any non-scan message when we have context = question about the last scanned token
       const d = lastScanResult;
       let followup = `**More on ${d.token_symbol || "this token"}:**\n\n`;
 
