@@ -80,6 +80,30 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 });
 
 // On install/update
+// Context menu
+chrome.contextMenus?.create?.({
+  id: "scan-selected",
+  title: "🗿 Scan with Rug Munch",
+  contexts: ["selection"],
+});
+
+chrome.contextMenus?.onClicked?.addListener((info, tab) => {
+  if (info.menuItemId === "scan-selected" && info.selectionText) {
+    const text = info.selectionText.trim();
+    // Check if it looks like a Solana address
+    if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(text)) {
+      // Open popup with the address pre-filled
+      // Store it so popup can read it
+      chrome.storage.local.set({ pending_scan: text });
+      // Can't programmatically open popup, but badge indicates action
+      if (tab?.id) {
+        chrome.action.setBadgeText({ text: "?", tabId: tab.id });
+        chrome.action.setBadgeBackgroundColor({ color: "#7E4CFF", tabId: tab.id });
+      }
+    }
+  }
+});
+
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === "install") {
     console.log("[RMS] Rug Munch Scanner installed");

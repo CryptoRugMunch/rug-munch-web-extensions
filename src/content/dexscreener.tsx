@@ -7,7 +7,7 @@
  */
 
 import { RiskBadge } from "../components/RiskBadge";
-import { scanToken } from "../services/api";
+import { scanToken, batchScan } from "../services/api";
 import { injectComponent, waitForElement, extractMintFromUrl, removeAll } from "../utils/shadowInject";
 
 let currentMint: string | null = null;
@@ -62,13 +62,36 @@ async function injectRiskBadge() {
       );
     }
 
-    // 2. Also try to inject compact badges in token lists
+    // 2. Batch scan visible tokens in list views
     const tokenLinks = document.querySelectorAll('a[href*="/solana/"]');
+    const listMints: string[] = [];
+    const linkMap = new Map<string, Element>();
+
     for (const link of Array.from(tokenLinks).slice(0, 20)) {
       const linkMint = extractMintFromUrl((link as HTMLAnchorElement).href);
-      if (linkMint && linkMint !== mint) {
-        // Queue batch scan for visible tokens
-        // TODO: Batch these for efficiency
+      if (linkMint && linkMint !== mint && !linkMap.has(linkMint)) {
+        listMints.push(linkMint);
+        linkMap.set(linkMint, link);
+      }
+    }
+
+    if (listMints.length > 0) {
+      try {
+        const batchResult = await batchScan(listMints);
+        for (const [batchMint, data] of Object.entries(batchResult.results)) {
+          const linkEl = linkMap.get(batchMint);
+          if (linkEl && data.risk_score !== null && data.risk_score !== undefined) {
+            injectComponent(
+              `list-badge-${batchMint}`,
+              linkEl,
+              RiskBadge,
+              { score: data.risk_score, symbol: data.token_symbol, mint: batchMint, compact: true },
+              "after"
+            );
+          }
+        }
+      } catch (e) {
+        console.debug("[RMS] Batch scan failed:", e);
       }
     }
   } catch (e) {

@@ -12,12 +12,14 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import Settings from "./Settings";
+import Onboarding from "./Onboarding";
 import { scanToken, type ScanResult } from "../services/api";
 import { riskColor, riskLabel, riskEmoji, COLORS } from "../utils/designTokens";
 import { extractMintFromUrl } from "../utils/shadowInject";
 
 const Popup: React.FC = () => {
-  const [view, setView] = useState<"main" | "settings">("main");
+  const [view, setView] = useState<"main" | "settings" | "onboarding">("main");
+  const [, setHasOnboarded] = useState(true);
   const [input, setInput] = useState("");
   const [scanning, setScanning] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
@@ -27,12 +29,35 @@ const Popup: React.FC = () => {
   const [linked, setLinked] = useState(false);
   const [activeTabMint, setActiveTabMint] = useState<string | null>(null);
 
+  // Check onboarding
+  useEffect(() => {
+    chrome.storage.local.get("onboarded", (data) => {
+      if (!data.onboarded) {
+        setHasOnboarded(false);
+        setView("onboarding");
+      }
+    });
+  }, []);
+
   // Load state
   useEffect(() => {
     chrome.storage.local.get(["tier", "scan_count", "linked_telegram"], (data) => {
       setTier(data.tier || "free");
       setScanCount(data.scan_count || 0);
       setLinked(!!data.linked_telegram);
+    });
+
+    // Check for pending scan from context menu
+    chrome.storage.local.get("pending_scan", (data) => {
+      if (data.pending_scan) {
+        setInput(data.pending_scan);
+        chrome.storage.local.remove("pending_scan");
+        // Auto-trigger scan
+        setTimeout(() => {
+          const scanBtn = document.querySelector("[data-scan-btn]") as HTMLButtonElement;
+          scanBtn?.click();
+        }, 100);
+      }
     });
 
     // Detect mint from active tab
@@ -75,6 +100,14 @@ const Popup: React.FC = () => {
     holder: "$CRM Holder (100/hr)",
     vip: "VIP (Unlimited)",
   }[tier] || "Free";
+
+  if (view === "onboarding") {
+    return <Onboarding onComplete={() => {
+      chrome.storage.local.set({ onboarded: true });
+      setHasOnboarded(true);
+      setView("main");
+    }} />;
+  }
 
   if (view === "settings") {
     return <Settings onBack={() => setView("main")} />;
@@ -260,6 +293,24 @@ const ScanResultCard: React.FC<{ result: ScanResult }> = ({ result }) => {
           ))}
         </div>
       )}
+
+      {/* Share button */}
+      <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${COLORS.border}` }}>
+        <button
+          onClick={() => {
+            const shareText = `${emoji} $${result.token_symbol || "?"} Risk: ${result.risk_score}/100 (${label})\nPrice: $${result.price_usd?.toFixed(6) || "—"} | Liq: ${formatUsd(result.liquidity_usd)}\nScanned by Rug Munch 🗿 https://t.me/rug_munchy_bot`;
+            navigator.clipboard.writeText(shareText);
+          }}
+          style={{
+            width: "100%", padding: "6px 0", borderRadius: 6,
+            border: `1px solid ${COLORS.border}`, backgroundColor: "transparent",
+            color: COLORS.textSecondary, fontSize: 11, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+          }}
+        >
+          📤 Share Scan Result
+        </button>
+      </div>
 
       {/* Full address */}
       <div style={{
