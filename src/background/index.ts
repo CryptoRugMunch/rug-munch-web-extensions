@@ -238,3 +238,64 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 
 export {};
+
+
+// ─── Wallet Bridge Relay ────────────────────────────────────────
+// Relays wallet operations from popup to content script on active tab
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (!["wallet-detect", "wallet-connect", "wallet-sign", "wallet-disconnect"].includes(msg.action)) {
+    return false;
+  }
+
+  // Find a suitable tab with Phantom available
+  findWalletTab().then((tabId) => {
+    if (!tabId) {
+      sendResponse({
+        success: false,
+        error: "No crypto page open. Open DexScreener, Pump.fun, Jupiter, or any Solana site first.",
+      });
+      return;
+    }
+
+    chrome.tabs.sendMessage(tabId, msg, (response) => {
+      if (chrome.runtime.lastError) {
+        sendResponse({
+          success: false,
+          error: "Couldn't reach wallet bridge. Refresh the page and try again.",
+        });
+        return;
+      }
+      sendResponse(response);
+    });
+  });
+
+  return true; // async response
+});
+
+async function findWalletTab(): Promise<number | null> {
+  // First try the active tab
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (activeTab?.id && isWalletSite(activeTab.url || "")) {
+    return activeTab.id;
+  }
+
+  // Search for any open crypto tab
+  const allTabs = await chrome.tabs.query({});
+  for (const tab of allTabs) {
+    if (tab.id && isWalletSite(tab.url || "")) {
+      return tab.id;
+    }
+  }
+
+  return null;
+}
+
+function isWalletSite(url: string): boolean {
+  const patterns = [
+    "dexscreener.com", "pump.fun", "jup.ag", "raydium.io",
+    "birdeye.so", "bullx.io", "gmgn.ai", "photon-sol.tinyastro.io",
+    "phantom.app", "solscan.io", "solana.fm",
+  ];
+  return patterns.some((p) => url.includes(p));
+}

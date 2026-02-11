@@ -112,6 +112,26 @@
         "src/content/photon.tsx"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://dexscreener.com/*",
+        "https://pump.fun/*",
+        "https://jup.ag/*",
+        "https://raydium.io/*",
+        "https://birdeye.so/*",
+        "https://bullx.io/*",
+        "https://gmgn.ai/*",
+        "https://photon-sol.tinyastro.io/*",
+        "https://phantom.app/*",
+        "https://solscan.io/*",
+        "https://solana.fm/*"
+      ],
+      "js": [
+        "src/content/walletBridge.ts"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
     }
   ],
   "side_panel": {

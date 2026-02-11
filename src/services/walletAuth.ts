@@ -3,7 +3,7 @@
  *
  * Flow:
  * 1. Extension requests a challenge nonce from API
- * 2. User signs the nonce with their wallet (browser extension)
+ * 2. Background relays to content script → page-level Phantom.signMessage
  * 3. Extension sends signature to API for verification
  * 4. API returns auth_token
  *
@@ -27,29 +27,58 @@ async function getHeaders(): Promise<Record<string, string>> {
   return headers;
 }
 
-// ─── Phantom/Solana Wallet Detection ────────────────────────────
+// ─── Phantom Wallet Bridge ──────────────────────────────────────
 
-export interface SolanaWallet {
-  publicKey: { toBase58(): string };
-  signMessage(message: Uint8Array): Promise<{ signature: Uint8Array }>;
-  connect(): Promise<{ publicKey: { toBase58(): string } }>;
-  disconnect(): Promise<void>;
-  isConnected: boolean;
+interface WalletBridgeResult {
+  success: boolean;
+  publicKey?: string;
+  isConnected?: boolean;
+  phantom?: boolean;
+  signature?: string;
+  error?: string;
 }
 
 /**
- * Detect available Solana wallets in the browser.
- * Checks for Phantom, Solflare, Backpack, etc.
+ * Send a message to the wallet bridge content script via the background.
  */
-export async function detectWallets(): Promise<string[]> {
-  const wallets: string[] = [];
+async function walletBridgeCall(action: string, params: Record<string, any> = {}): Promise<WalletBridgeResult> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ action, ...params }, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve({ success: false, error: chrome.runtime.lastError.message || "Bridge communication failed" });
+        return;
+      }
+      resolve(response || { success: false, error: "No response from wallet bridge" });
+    });
+  });
+}
 
-  // We can't access window.solana from extension popup directly.
-  // Instead, we inject a content script to detect wallets on the active tab.
-  // For now, we'll use the manual address entry approach.
-  // Wallet signing requires the content script to relay.
+/**
+ * Detect if Phantom wallet is available on any open tab.
+ */
+export async function detectPhantom(): Promise<{ available: boolean; connected: boolean; publicKey: string | null }> {
+  const result = await walletBridgeCall("wallet-detect");
+  return {
+    available: result.success && !!result.phantom,
+    connected: result.success && !!result.isConnected,
+    publicKey: result.publicKey || null,
+  };
+}
 
-  return wallets;
+/**
+ * Connect to Phantom wallet and get the public key.
+ */
+export async function connectPhantom(): Promise<{ success: boolean; publicKey?: string; error?: string }> {
+  const result = await walletBridgeCall("wallet-connect");
+  return result;
+}
+
+/**
+ * Sign a message with Phantom and return the base58-encoded signature.
+ */
+export async function signWithPhantom(message: string, nonce: string): Promise<{ success: boolean; signature?: string; publicKey?: string; error?: string }> {
+  const result = await walletBridgeCall("wallet-sign", { message, nonce });
+  return result;
 }
 
 // ─── Auth Flow ──────────────────────────────────────────────────
@@ -83,7 +112,30 @@ export async function getChallenge(): Promise<{ nonce: string; message: string }
 }
 
 /**
- * Verify a signed challenge. Creates or logs in user.
+ * Full wallet auth flow using Phantom signing:
+ * 1. Get challenge nonce
+ * 2. Sign with Phantom
+ * 3. Send signature to API
+ */
+export async function authenticateWithPhantom(): Promise<AuthResult> {
+  // Step 1: Get challenge
+  const challenge = await getChallenge();
+  if (!challenge) {
+    return { success: false, error: "Couldn't connect to API" };
+  }
+
+  // Step 2: Sign with Phantom
+  const signResult = await signWithPhantom(challenge.message, challenge.nonce);
+  if (!signResult.success || !signResult.signature || !signResult.publicKey) {
+    return { success: false, error: signResult.error || "Wallet signing failed" };
+  }
+
+  // Step 3: Verify with API
+  return verifyWalletSignature(signResult.publicKey, signResult.signature, challenge.nonce);
+}
+
+/**
+ * Verify a signed challenge with the API. Creates or logs in user.
  */
 export async function verifyWalletSignature(
   walletAddress: string,
@@ -133,6 +185,19 @@ export async function verifyWalletSignature(
   } catch (e: any) {
     return { success: false, error: e.message || "Connection failed" };
   }
+}
+
+/**
+ * Manual wallet auth (paste address) — fallback when Phantom isn't available.
+ * Uses a simplified flow without signature verification.
+ */
+export async function authenticateWithAddress(walletAddress: string): Promise<AuthResult> {
+  const challenge = await getChallenge();
+  if (!challenge) {
+    return { success: false, error: "Couldn't connect to API" };
+  }
+  // Send "manual-entry" as signature — backend will soft-verify
+  return verifyWalletSignature(walletAddress, "manual-entry", challenge.nonce);
 }
 
 // ─── Multi-Wallet Management ────────────────────────────────────

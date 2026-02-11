@@ -16,7 +16,7 @@ import {
   getAccount, updateAccount, type AccountState, DEFAULT_SETTINGS,
 } from "../utils/config";
 import {
-  getChallenge, verifyWalletSignature,
+  detectPhantom, authenticateWithPhantom, authenticateWithAddress,
   listWallets, addWallet, removeWallet,
   type WalletInfo,
 } from "../services/walletAuth";
@@ -77,7 +77,41 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
   }, [settings]);
 
   // ─── Wallet Sign-In ───────────────────────────────────────────
-  const handleWalletAuth = useCallback(async () => {
+  // Phantom detection state
+  const [phantomAvailable, setPhantomAvailable] = useState<boolean | null>(null);
+
+  // Detect Phantom on mount
+  useEffect(() => {
+    detectPhantom().then((r) => setPhantomAvailable(r.available));
+  }, []);
+
+  const handlePhantomAuth = useCallback(async () => {
+    setWalletLoading(true);
+    setWalletError(null);
+
+    const result = await authenticateWithPhantom();
+
+    if (result.success) {
+      const updated = await updateAccount({
+        tier: result.tier as any || "free",
+        authToken: result.authToken || null,
+        telegramId: account?.telegramId || null,
+        telegramUsername: account?.telegramUsername || null,
+        linkedAt: new Date().toISOString(),
+      });
+      setAccount(updated);
+      chrome.storage.local.set({
+        tier: result.tier, auth_token: result.authToken,
+      });
+      listWallets().then(setWallets).catch(() => {});
+    } else {
+      setWalletError(result.error || "Authentication failed");
+    }
+
+    setWalletLoading(false);
+  }, [account]);
+
+  const handleManualWalletAuth = useCallback(async () => {
     const addr = walletInput.trim();
     if (!addr || addr.length < 32) {
       setWalletError("Enter a valid Solana wallet address");
@@ -87,14 +121,7 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
     setWalletLoading(true);
     setWalletError(null);
 
-    const challenge = await getChallenge();
-    if (!challenge) {
-      setWalletError("Couldn't connect to API");
-      setWalletLoading(false);
-      return;
-    }
-
-    const result = await verifyWalletSignature(addr, "extension-auth", challenge.nonce);
+    const result = await authenticateWithAddress(addr);
 
     if (result.success) {
       const updated = await updateAccount({
@@ -219,29 +246,58 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
           </div>
 
           {authTab === "wallet" ? (
-            /* Wallet Auth */
+            /* Wallet Auth — Phantom signing or manual fallback */
             <div style={{ padding: 12, borderRadius: 8, backgroundColor: COLORS.bgCard, marginBottom: 8 }}>
-              <p style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 8 }}>
-                Sign in with your Solana wallet address. No Telegram needed.
-              </p>
-              <input type="text" placeholder="Your Solana wallet address..."
-                value={walletInput}
-                onChange={(e) => { setWalletInput(e.target.value); setWalletError(null); }}
+              {/* Primary: Phantom sign-in */}
+              <button onClick={handlePhantomAuth} disabled={walletLoading}
                 style={{
-                  width: "100%", padding: "8px 10px", borderRadius: 6,
-                  backgroundColor: COLORS.bg, border: `1px solid ${COLORS.border}`,
-                  color: COLORS.textPrimary, fontSize: 11, fontFamily: "monospace",
-                  outline: "none", marginBottom: 6, boxSizing: "border-box",
-                }} />
-              <button onClick={handleWalletAuth} disabled={walletLoading || walletInput.length < 32}
-                style={{
-                  width: "100%", padding: "8px 0", borderRadius: 6,
-                  backgroundColor: walletInput.length >= 32 ? COLORS.purple : COLORS.border,
-                  color: "#fff", border: "none", fontSize: 12, fontWeight: 600,
-                  cursor: walletInput.length >= 32 ? "pointer" : "default",
+                  width: "100%", padding: "10px 0", borderRadius: 8,
+                  backgroundColor: phantomAvailable !== false ? "#AB9FF2" : COLORS.border,
+                  color: "#fff", border: "none", fontSize: 13, fontWeight: 700,
+                  cursor: walletLoading ? "default" : "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  opacity: walletLoading ? 0.7 : 1,
+                  marginBottom: 8,
                 }}>
-                {walletLoading ? "Connecting..." : "Sign In with Wallet"}
+                {walletLoading ? "Connecting..." : "👻 Sign In with Phantom"}
               </button>
+
+              {phantomAvailable === false && (
+                <div style={{ fontSize: 10, color: COLORS.textMuted, textAlign: "center", marginBottom: 8, padding: "4px 8px", borderRadius: 4, backgroundColor: `${COLORS.gold}10` }}>
+                  ⚠️ Phantom not detected on current tab. Open a crypto site (DexScreener, Pump.fun, etc.) and try again.
+                </div>
+              )}
+
+              {/* Fallback: Manual address entry */}
+              <details style={{ marginTop: 4 }}>
+                <summary style={{ fontSize: 10, color: COLORS.textMuted, cursor: "pointer", userSelect: "none" }}>
+                  Don't have Phantom? Enter address manually
+                </summary>
+                <div style={{ marginTop: 8 }}>
+                  <input type="text" placeholder="Your Solana wallet address..."
+                    value={walletInput}
+                    onChange={(e) => { setWalletInput(e.target.value); setWalletError(null); }}
+                    style={{
+                      width: "100%", padding: "8px 10px", borderRadius: 6,
+                      backgroundColor: COLORS.bg, border: `1px solid ${COLORS.border}`,
+                      color: COLORS.textPrimary, fontSize: 11, fontFamily: "monospace",
+                      outline: "none", marginBottom: 6, boxSizing: "border-box",
+                    }} />
+                  <button onClick={handleManualWalletAuth} disabled={walletLoading || walletInput.length < 32}
+                    style={{
+                      width: "100%", padding: "8px 0", borderRadius: 6,
+                      backgroundColor: walletInput.length >= 32 ? COLORS.purple : COLORS.border,
+                      color: "#fff", border: "none", fontSize: 12, fontWeight: 600,
+                      cursor: walletInput.length >= 32 ? "pointer" : "default",
+                    }}>
+                    {walletLoading ? "Verifying..." : "Sign In with Address"}
+                  </button>
+                  <div style={{ marginTop: 4, fontSize: 9, color: COLORS.textMuted }}>
+                    ⚠️ Manual entry has limited verification. Use Phantom for full security.
+                  </div>
+                </div>
+              </details>
+
               {walletError && (
                 <div style={{ marginTop: 6, color: COLORS.red, fontSize: 11 }}>❌ {walletError}</div>
               )}
