@@ -30,6 +30,7 @@ const SidePanel: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [tier, setTier] = useState("free");
   const [linked, setLinked] = useState(false);
+  const [authToken, setAuthToken] = useState<string | null>(null);
   const [detectedMint, setDetectedMint] = useState<string | null>(null);
   const [msgCount, setMsgCount] = useState(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -38,9 +39,10 @@ const SidePanel: React.FC = () => {
 
   // Load state
   useEffect(() => {
-    chrome.storage.local.get(["tier", "linked_telegram"], (data) => {
+    chrome.storage.local.get(["tier", "linked_telegram", "auth_token"], (data) => {
       setTier(data.tier || "free");
       setLinked(!!data.linked_telegram);
+      setAuthToken(data.auth_token || null);
     });
 
     // Welcome message
@@ -181,9 +183,9 @@ const SidePanel: React.FC = () => {
   }, [input, loading, msgCount, detectedMint]);
 
   // Tier gate check
-  const hasAccess = tier !== "free"; // Any linked user can access
+  const hasAccess = tier !== "free" || !!linked || !!authToken; // Any authenticated user
 
-  if (!hasAccess && !linked) {
+  if (!hasAccess) {
     return (
       <div style={{
         minHeight: "100vh", backgroundColor: COLORS.bg,
@@ -194,10 +196,10 @@ const SidePanel: React.FC = () => {
         <div style={{ fontSize: 48, marginBottom: 16 }}>🗿</div>
         <h2 style={{ color: COLORS.gold, marginBottom: 8 }}>Marcus Chat</h2>
         <p style={{ color: COLORS.textSecondary, fontSize: 13, marginBottom: 20, maxWidth: 280 }}>
-          Link your Telegram account to unlock Marcus Chat. Free scanning works in the popup — click the extension icon.
+          Sign in to unlock Marcus Chat. Use your Solana wallet or Telegram — no email needed.
         </p>
         <button
-          onClick={() => chrome.tabs.create({ url: "https://t.me/rug_munchy_bot?start=link_extension" })}
+          onClick={() => chrome.runtime.sendMessage({ type: "OPEN_SETTINGS" })}
           style={{
             padding: "10px 20px", borderRadius: 8,
             backgroundColor: COLORS.purple, color: "#fff",
@@ -205,7 +207,7 @@ const SidePanel: React.FC = () => {
             cursor: "pointer",
           }}
         >
-          🔗 Link Telegram Account
+          🔑 Sign In
         </button>
         <p style={{ color: COLORS.textMuted, fontSize: 10, marginTop: 16 }}>
           Hold $CRM for unlimited access

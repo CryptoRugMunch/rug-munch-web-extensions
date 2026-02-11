@@ -12,6 +12,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import Settings from "./Settings";
+import Upgrade from "./Upgrade";
 import Onboarding from "./Onboarding";
 import { scanToken, type ScanResult, type ExtScanResponse } from "../services/api";
 import { trackScan } from "../services/analytics";
@@ -19,7 +20,7 @@ import { riskColor, riskLabel, riskEmoji, COLORS } from "../utils/designTokens";
 import { extractMintFromUrl } from "../utils/shadowInject";
 
 const Popup: React.FC = () => {
-  const [view, setView] = useState<"main" | "settings" | "onboarding">("main");
+  const [view, setView] = useState<"main" | "settings" | "onboarding" | "upgrade">("main");
   const [, setHasOnboarded] = useState(true);
   const [input, setInput] = useState("");
   const [scanning, setScanning] = useState(false);
@@ -121,6 +122,10 @@ const Popup: React.FC = () => {
     return <Settings onBack={() => setView("main")} />;
   }
 
+  if (view === "upgrade") {
+    return <Upgrade onBack={() => setView("main")} currentTier={tier} />;
+  }
+
   return (
     <div style={{
       width: 380, minHeight: 480,
@@ -142,6 +147,18 @@ const Popup: React.FC = () => {
           }}>
             {tierLabel}
           </span>
+          {(tier === "free" || tier === "free_linked") && (
+            <button
+              onClick={() => setView("upgrade")}
+              style={{
+                fontSize: 9, padding: "2px 6px", borderRadius: 8,
+                backgroundColor: `${COLORS.gold}20`, border: `1px solid ${COLORS.gold}40`,
+                color: COLORS.gold, cursor: "pointer", fontWeight: 600,
+              }}
+            >
+              ↑
+            </button>
+          )}
           <button
             onClick={() => setView("settings")}
             style={{
