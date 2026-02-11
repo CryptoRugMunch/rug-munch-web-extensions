@@ -1,8 +1,14 @@
 /**
- * Upgrade — Tier upgrade page with SOL/USDC payment.
+ * Upgrade — Tier upgrade with SOL/USDC on-chain payment.
+ *
+ * Flow:
+ * 1. Pick tier + currency → create payment intent
+ * 2. Show amount + wallet → user sends from any wallet
+ * 3. Auto-detect payment on-chain (no tx paste needed)
+ * 4. Upgrade confirmed → update local tier
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { COLORS } from "../utils/designTokens";
 import { getApiBase } from "../utils/config";
 
@@ -29,19 +35,31 @@ interface PaymentIntent {
   memo: string;
 }
 
+const POLL_INTERVAL = 4000; // 4s — don't hammer RPC
+const POLL_TIMEOUT = 3600_000; // 1 hour
+
 const Upgrade: React.FC<UpgradeProps> = ({ onBack, currentTier }) => {
   const [pricing, setPricing] = useState<PricingData | null>(null);
   const [selectedTier, setSelectedTier] = useState<string>("holder");
   const [currency, setCurrency] = useState<"sol" | "usdc">("sol");
-  const [step, setStep] = useState<"select" | "pay" | "verify">("select");
+  const [step, setStep] = useState<"select" | "pay" | "success">("select");
   const [intent, setIntent] = useState<PaymentIntent | null>(null);
-  const [txInput, setTxInput] = useState("");
-  const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [verifiedTier, setVerifiedTier] = useState<string | null>(null);
+  const [txSig, setTxSig] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startRef = useRef<number>(0);
 
   useEffect(() => {
     fetchPricing();
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
   }, []);
 
   const fetchPricing = async () => {
@@ -51,6 +69,12 @@ const Upgrade: React.FC<UpgradeProps> = ({ onBack, currentTier }) => {
       if (resp.ok) setPricing(await resp.json());
     } catch {}
   };
+
+  const copyAddress = useCallback((addr: string) => {
+    navigator.clipboard.writeText(addr);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, []);
 
   const createIntent = useCallback(async () => {
     setError(null);
@@ -77,52 +101,70 @@ const Upgrade: React.FC<UpgradeProps> = ({ onBack, currentTier }) => {
         return;
       }
 
-      const data = await resp.json();
+      const data: PaymentIntent = await resp.json();
       setIntent(data);
       setStep("pay");
+
+      // Start polling for auto-detection
+      startPolling(data.payment_id);
     } catch (e: any) {
       setError(e.message || "Connection failed");
     }
   }, [selectedTier, currency]);
 
-  const verifyPayment = useCallback(async () => {
-    if (!txInput || !intent) return;
-    setVerifying(true);
-    setError(null);
+  const startPolling = useCallback(async (paymentId: string) => {
+    startRef.current = Date.now();
+    setElapsed(0);
 
-    try {
-      const base = await getApiBase();
-      const token = (await chrome.storage.local.get("auth_token")).auth_token;
+    // Elapsed timer
+    timerRef.current = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
+    }, 1000);
 
-      const resp = await fetch(`${base}/ext/payments/verify`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          tx_signature: txInput.trim(),
-          payment_id: intent.payment_id,
-        }),
-      });
-
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        setError(err.detail || "Verification failed");
-        setVerifying(false);
+    // Payment detection poll
+    pollRef.current = setInterval(async () => {
+      if (Date.now() - startRef.current > POLL_TIMEOUT) {
+        if (pollRef.current) clearInterval(pollRef.current);
+        if (timerRef.current) clearInterval(timerRef.current);
+        setError("Payment window expired. Create a new payment if needed.");
         return;
       }
 
-      const data = await resp.json();
-      // Update local tier
-      chrome.storage.local.set({ tier: data.tier });
-      setSuccess(true);
-      setStep("verify");
-    } catch (e: any) {
-      setError(e.message || "Verification failed");
-    }
-    setVerifying(false);
-  }, [txInput, intent]);
+      try {
+        const base = await getApiBase();
+        const token = (await chrome.storage.local.get("auth_token")).auth_token;
+
+        const resp = await fetch(`${base}/ext/payments/check/${paymentId}`, {
+          headers: { "Authorization": `Bearer ${token}` },
+        });
+
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        if (data.status === "verified") {
+          if (pollRef.current) clearInterval(pollRef.current);
+          if (timerRef.current) clearInterval(timerRef.current);
+          chrome.storage.local.set({ tier: data.tier });
+          setVerifiedTier(data.tier);
+          setTxSig(data.tx_signature || null);
+          setStep("success");
+        } else if (data.status === "expired" || data.status === "failed") {
+          if (pollRef.current) clearInterval(pollRef.current);
+          if (timerRef.current) clearInterval(timerRef.current);
+          setError("Payment expired or failed. Please try again.");
+        }
+      } catch {}
+    }, POLL_INTERVAL);
+  }, []);
+
+  const cancelPayment = useCallback(() => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    if (timerRef.current) clearInterval(timerRef.current);
+    setStep("select");
+    setIntent(null);
+    setError(null);
+    setElapsed(0);
+  }, []);
 
   if (!pricing) {
     return (
@@ -134,17 +176,27 @@ const Upgrade: React.FC<UpgradeProps> = ({ onBack, currentTier }) => {
     );
   }
 
-  // Success screen
-  if (success) {
+  // ─── Success Screen ───────────────────────────────────────────
+  if (step === "success") {
     return (
       <Container onBack={onBack}>
-        <div style={{ textAlign: "center", padding: 30 }}>
+        <div style={{ textAlign: "center", padding: 24 }}>
           <div style={{ fontSize: 48, marginBottom: 12 }}>🎉</div>
-          <h2 style={{ color: COLORS.gold, marginBottom: 8 }}>Upgrade Complete!</h2>
-          <p style={{ color: COLORS.textSecondary, fontSize: 13 }}>
-            You're now a {selectedTier === "vip" ? "VIP" : "$CRM Holder"}.
-            Reload the extension to activate your new tier.
+          <h2 style={{ color: COLORS.gold, marginBottom: 8, fontSize: 18 }}>Upgrade Complete!</h2>
+          <p style={{ color: COLORS.textSecondary, fontSize: 13, marginBottom: 4 }}>
+            You're now a <strong style={{ color: COLORS.gold }}>
+              {verifiedTier === "vip" ? "VIP" : "$CRM Holder"}
+            </strong>.
           </p>
+          {txSig && (
+            <div style={{
+              fontSize: 9, fontFamily: "monospace", color: COLORS.textMuted,
+              marginTop: 8, wordBreak: "break-all", padding: "6px 8px",
+              borderRadius: 4, backgroundColor: COLORS.bgCard,
+            }}>
+              tx: {txSig}
+            </div>
+          )}
           <button onClick={onBack} style={{
             marginTop: 16, padding: "10px 24px", borderRadius: 8,
             backgroundColor: COLORS.purple, color: "#fff",
@@ -155,17 +207,22 @@ const Upgrade: React.FC<UpgradeProps> = ({ onBack, currentTier }) => {
     );
   }
 
-  // Payment step
+  // ─── Payment Screen (auto-detect) ────────────────────────────
   if (step === "pay" && intent) {
+    const minutes = Math.floor(elapsed / 60);
+    const seconds = elapsed % 60;
+    const timeStr = `${minutes}:${seconds.toString().padStart(2, "0")}`;
+
     return (
-      <Container onBack={() => setStep("select")}>
+      <Container onBack={cancelPayment}>
         <h3 style={{ color: COLORS.gold, marginBottom: 12, fontSize: 14 }}>
           Send Payment
         </h3>
 
+        {/* Amount */}
         <div style={{
           padding: 14, borderRadius: 10, backgroundColor: COLORS.bgCard,
-          border: `1px solid ${COLORS.border}`, marginBottom: 12,
+          border: `1px solid ${COLORS.border}`, marginBottom: 10,
         }}>
           <div style={{ fontSize: 11, color: COLORS.textMuted, marginBottom: 4 }}>Amount</div>
           <div style={{ fontSize: 22, fontWeight: 700, color: COLORS.textPrimary }}>
@@ -176,64 +233,74 @@ const Upgrade: React.FC<UpgradeProps> = ({ onBack, currentTier }) => {
           </div>
         </div>
 
+        {/* Wallet address */}
         <div style={{
           padding: 14, borderRadius: 10, backgroundColor: COLORS.bgCard,
-          border: `1px solid ${COLORS.border}`, marginBottom: 12,
+          border: `1px solid ${COLORS.border}`, marginBottom: 10,
         }}>
           <div style={{ fontSize: 11, color: COLORS.textMuted, marginBottom: 4 }}>
             Send to this wallet:
           </div>
-          <div style={{
-            fontSize: 10, fontFamily: "monospace", color: COLORS.cyan,
-            wordBreak: "break-all", cursor: "pointer",
-            padding: "6px 8px", borderRadius: 4,
-            backgroundColor: `${COLORS.cyan}10`,
-          }} onClick={() => navigator.clipboard.writeText(intent.payment_wallet)}>
-            {intent.payment_wallet}
-            <span style={{ fontSize: 9, color: COLORS.textMuted, marginLeft: 4 }}>📋 tap to copy</span>
-          </div>
-        </div>
-
-        <div style={{
-          padding: 10, borderRadius: 8, backgroundColor: `${COLORS.gold}10`,
-          border: `1px solid ${COLORS.gold}20`, marginBottom: 12,
-          fontSize: 11, color: COLORS.gold,
-        }}>
-          💡 After sending, paste your transaction signature below to verify.
-        </div>
-
-        <div style={{ marginBottom: 8 }}>
-          <div style={{ fontSize: 11, color: COLORS.textMuted, marginBottom: 4 }}>
-            Transaction Signature:
-          </div>
-          <input type="text" placeholder="Paste tx signature..."
-            value={txInput}
-            onChange={(e) => { setTxInput(e.target.value); setError(null); }}
+          <div
+            onClick={() => copyAddress(intent.payment_wallet)}
             style={{
-              width: "100%", padding: "8px 10px", borderRadius: 6,
-              backgroundColor: COLORS.bg, border: `1px solid ${COLORS.border}`,
-              color: COLORS.textPrimary, fontSize: 10, fontFamily: "monospace",
-              outline: "none", boxSizing: "border-box",
-            }} />
+              fontSize: 10, fontFamily: "monospace", color: COLORS.cyan,
+              wordBreak: "break-all", cursor: "pointer",
+              padding: "8px 10px", borderRadius: 6,
+              backgroundColor: `${COLORS.cyan}08`,
+              border: `1px solid ${COLORS.cyan}20`,
+              transition: "all 0.2s",
+            }}>
+            {intent.payment_wallet}
+            <span style={{
+              display: "block", fontSize: 9, marginTop: 4,
+              color: copied ? COLORS.green : COLORS.textMuted,
+            }}>
+              {copied ? "✓ Copied!" : "📋 Tap to copy"}
+            </span>
+          </div>
         </div>
 
-        <button onClick={verifyPayment}
-          disabled={!txInput.trim() || verifying}
-          style={{
-            width: "100%", padding: "10px 0", borderRadius: 8,
-            backgroundColor: txInput.trim() ? COLORS.green : COLORS.border,
-            color: "#fff", border: "none", fontSize: 13, fontWeight: 600,
-            cursor: txInput.trim() ? "pointer" : "default",
+        {/* Waiting indicator */}
+        <div style={{
+          padding: 14, borderRadius: 10, textAlign: "center",
+          backgroundColor: `${COLORS.purple}08`,
+          border: `1px solid ${COLORS.purple}20`, marginBottom: 10,
+        }}>
+          <PulsingDot />
+          <div style={{
+            fontSize: 13, fontWeight: 600, color: COLORS.textPrimary, marginTop: 8,
           }}>
-          {verifying ? "Verifying on-chain..." : "Verify Payment ✓"}
-        </button>
+            Watching for your payment...
+          </div>
+          <div style={{ fontSize: 10, color: COLORS.textSecondary, marginTop: 4 }}>
+            Send the exact amount above. We'll detect it automatically.
+          </div>
+          <div style={{
+            fontSize: 10, fontFamily: "monospace",
+            color: COLORS.textMuted, marginTop: 6,
+          }}>
+            ⏱ {timeStr}
+          </div>
+        </div>
 
-        {error && <div style={{ marginTop: 6, color: COLORS.red, fontSize: 11 }}>❌ {error}</div>}
+        {/* Cancel */}
+        <button onClick={cancelPayment} style={{
+          width: "100%", padding: "8px 0", borderRadius: 8,
+          backgroundColor: "transparent", border: `1px solid ${COLORS.border}`,
+          color: COLORS.textSecondary, fontSize: 11, cursor: "pointer",
+        }}>Cancel</button>
+
+        {error && (
+          <div style={{ marginTop: 6, color: COLORS.red, fontSize: 11, textAlign: "center" }}>
+            ❌ {error}
+          </div>
+        )}
       </Container>
     );
   }
 
-  // Tier selection step
+  // ─── Tier Selection ───────────────────────────────────────────
   const holderPricing = pricing.tiers.holder;
   const vipPricing = pricing.tiers.vip;
 
@@ -254,26 +321,28 @@ const Upgrade: React.FC<UpgradeProps> = ({ onBack, currentTier }) => {
       </div>
 
       {/* Tier cards */}
-      <TierCard
-        name="Holder"
-        emoji="💎"
-        features={holderPricing.features}
-        priceSol={holderPricing.prices.sol}
-        priceUsdc={holderPricing.prices.usdc}
-        selected={selectedTier === "holder"}
-        onSelect={() => setSelectedTier("holder")}
-        isCurrent={currentTier === "holder"}
-      />
-      <TierCard
-        name="VIP"
-        emoji="👑"
-        features={vipPricing.features}
-        priceSol={vipPricing.prices.sol}
-        priceUsdc={vipPricing.prices.usdc}
-        selected={selectedTier === "vip"}
-        onSelect={() => setSelectedTier("vip")}
-        isCurrent={currentTier === "vip"}
-      />
+      {holderPricing && (
+        <TierCard
+          name="Holder" emoji="💎"
+          features={holderPricing.features}
+          priceSol={holderPricing.prices.sol}
+          priceUsdc={holderPricing.prices.usdc}
+          selected={selectedTier === "holder"}
+          onSelect={() => setSelectedTier("holder")}
+          isCurrent={currentTier === "holder"}
+        />
+      )}
+      {vipPricing && (
+        <TierCard
+          name="VIP" emoji="👑"
+          features={vipPricing.features}
+          priceSol={vipPricing.prices.sol}
+          priceUsdc={vipPricing.prices.usdc}
+          selected={selectedTier === "vip"}
+          onSelect={() => setSelectedTier("vip")}
+          isCurrent={currentTier === "vip"}
+        />
+      )}
 
       {/* Currency toggle */}
       <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
@@ -292,8 +361,8 @@ const Upgrade: React.FC<UpgradeProps> = ({ onBack, currentTier }) => {
         }}>
         {currentTier === selectedTier ? "Already on this tier" :
           `Pay ${currency === "sol" ?
-            (selectedTier === "vip" ? vipPricing.prices.sol : holderPricing.prices.sol) + " SOL" :
-            (selectedTier === "vip" ? vipPricing.prices.usdc : holderPricing.prices.usdc) + " USDC"
+            (selectedTier === "vip" ? vipPricing?.prices.sol : holderPricing?.prices.sol) + " SOL" :
+            (selectedTier === "vip" ? vipPricing?.prices.usdc : holderPricing?.prices.usdc) + " USDC"
           } / month`}
       </button>
 
@@ -356,5 +425,25 @@ const CurrencyBtn: React.FC<{ label: string; active: boolean; onClick: () => voi
     color: active ? COLORS.cyan : COLORS.textMuted, cursor: "pointer",
   }}>{label}</button>
 );
+
+const PulsingDot: React.FC = () => {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => setFrame((f) => (f + 1) % 3), 600);
+    return () => clearInterval(interval);
+  }, []);
+  return (
+    <div style={{ display: "inline-flex", gap: 6 }}>
+      {[0, 1, 2].map((i) => (
+        <div key={i} style={{
+          width: 8, height: 8, borderRadius: 4,
+          backgroundColor: COLORS.purple,
+          opacity: i === frame ? 1 : 0.25,
+          transition: "opacity 0.3s ease",
+        }} />
+      ))}
+    </div>
+  );
+};
 
 export default Upgrade;
