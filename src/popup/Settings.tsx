@@ -1,10 +1,5 @@
 /**
  * Settings — Extension configuration + account linking.
- * 
- * Panels:
- * - Account: Link/unlink Telegram, view tier
- * - Scanning: Auto-scan, badges, swap warnings toggles
- * - Advanced: API URL, cache clear
  */
 
 import React, { useState, useEffect, useCallback } from "react";
@@ -21,9 +16,10 @@ interface SettingsProps {
 const Settings: React.FC<SettingsProps> = ({ onBack }) => {
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
   const [account, setAccount] = useState<AccountState | null>(null);
-  
   const [linkLoading, setLinkLoading] = useState(false);
   const [linkInput, setLinkInput] = useState("");
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [linkSuccess, setLinkSuccess] = useState(false);
 
   useEffect(() => {
     getSettings().then(setSettings);
@@ -35,23 +31,18 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
     setSettings(updated);
   }, [settings]);
 
-  const startLink = useCallback(async () => {
-    setLinkLoading(true);
-    try {
-      // User needs to get a code from the Telegram bot first
-      // Open bot with deep link
-      chrome.tabs.create({
-        url: "https://t.me/rug_munchy_bot?start=link_extension",
-      });
-    } catch (e) {
-      console.error("Link start failed:", e);
-    }
-    setLinkLoading(false);
+  const openBotLink = useCallback(() => {
+    chrome.tabs.create({
+      url: "https://t.me/rug_munchy_bot?start=link_extension",
+    });
   }, []);
 
   const verifyCode = useCallback(async () => {
     if (!linkInput || linkInput.length !== 6) return;
     setLinkLoading(true);
+    setLinkError(null);
+    setLinkSuccess(false);
+
     try {
       const apiBase = settings.apiBase;
       const resp = await fetch(`${apiBase}/ext/link/verify`, {
@@ -63,22 +54,50 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
         }),
       });
 
-      if (resp.ok) {
-        const data = await resp.json();
-        const updated = await updateAccount({
-          tier: data.tier || "free_linked",
-          telegramId: data.telegram_id,
-          linkedAt: new Date().toISOString(),
-        });
-        setAccount(updated);
-        
-        setLinkInput("");
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        setLinkError(err.detail || `Error: ${resp.status}`);
+        return;
       }
-    } catch (e) {
-      console.error("Link verify failed:", e);
+
+      const data = await resp.json();
+      const updated = await updateAccount({
+        tier: data.tier || "free_linked",
+        telegramId: data.telegram_id,
+        telegramUsername: data.telegram_username || null,
+        linkedAt: new Date().toISOString(),
+        authToken: data.auth_token || null,
+      });
+      setAccount(updated);
+
+      // Also store tier and auth in chrome.storage for other components
+      chrome.storage.local.set({
+        tier: data.tier || "free_linked",
+        linked_telegram: data.telegram_id,
+        auth_token: data.auth_token || null,
+      });
+
+      setLinkInput("");
+      setLinkSuccess(true);
+      setTimeout(() => setLinkSuccess(false), 5000);
+    } catch (e: any) {
+      setLinkError(e.message || "Connection failed — is the API running?");
+    } finally {
+      setLinkLoading(false);
     }
-    setLinkLoading(false);
   }, [linkInput, settings]);
+
+  const unlinkAccount = useCallback(async () => {
+    const updated = await updateAccount({
+      tier: "free",
+      telegramId: null,
+      telegramUsername: null,
+      linkedAt: null,
+      authToken: null,
+    });
+    setAccount(updated);
+    chrome.storage.local.set({ tier: "free", linked_telegram: null, auth_token: null });
+  }, []);
 
   return (
     <div style={{
@@ -113,64 +132,127 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
                   ✓ Telegram Linked
                 </div>
                 <div style={{ fontSize: 11, color: COLORS.textSecondary, marginTop: 2 }}>
-                  {account.telegramUsername || `ID: ${account.telegramId}`}
+                  {account.telegramUsername ? `@${account.telegramUsername}` : `ID: ${account.telegramId}`}
                 </div>
               </div>
               <TierBadge tier={account.tier} />
             </div>
+            <button
+              onClick={unlinkAccount}
+              style={{
+                marginTop: 8, background: "none", border: "none",
+                color: COLORS.textMuted, fontSize: 10, cursor: "pointer",
+                textDecoration: "underline",
+              }}
+            >
+              Unlink account
+            </button>
           </div>
         ) : (
           <div style={{ padding: 12, borderRadius: 8, backgroundColor: COLORS.bgCard }}>
             <p style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 10 }}>
               Link your Telegram to unlock more scans and sync your tier.
             </p>
-            <div style={{ display: "flex", gap: 6 }}>
-              <input
-                type="text"
-                placeholder="6-digit code from bot"
-                value={linkInput}
-                onChange={(e) => setLinkInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                maxLength={6}
-                style={{
-                  flex: 1, padding: "6px 10px", borderRadius: 6,
-                  backgroundColor: COLORS.bg, border: `1px solid ${COLORS.border}`,
-                  color: COLORS.textPrimary, fontSize: 13, fontFamily: "monospace",
-                  letterSpacing: "2px", textAlign: "center", outline: "none",
-                }}
-              />
+
+            {/* Step 1: Get code from bot */}
+            <div style={{
+              padding: 8, borderRadius: 6, marginBottom: 8,
+              backgroundColor: `${COLORS.purple}10`, border: `1px solid ${COLORS.purple}20`,
+              fontSize: 11, color: COLORS.textSecondary,
+            }}>
+              <strong style={{ color: COLORS.textPrimary }}>Step 1:</strong> Open the bot to get your link code
               <button
-                onClick={verifyCode}
-                disabled={linkInput.length !== 6 || linkLoading}
+                onClick={openBotLink}
                 style={{
-                  padding: "6px 12px", borderRadius: 6,
-                  backgroundColor: linkInput.length === 6 ? COLORS.purple : COLORS.border,
-                  color: "#fff", border: "none", fontSize: 12,
-                  fontWeight: 600, cursor: linkInput.length === 6 ? "pointer" : "default",
+                  display: "block", width: "100%", marginTop: 6,
+                  padding: "6px 0", borderRadius: 6,
+                  backgroundColor: COLORS.purple, border: "none",
+                  color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer",
                 }}
               >
-                Link
+                🤖 Open @rug_munchy_bot
               </button>
             </div>
-            <button
-              onClick={startLink}
-              style={{
-                width: "100%", marginTop: 8, padding: "6px 0",
-                background: "none", border: "none",
-                color: COLORS.cyan, fontSize: 11, cursor: "pointer",
-                textDecoration: "underline",
-              }}
-            >
-              Get code from @rug_munchy_bot →
-            </button>
+
+            {/* Step 2: Enter code */}
+            <div style={{
+              padding: 8, borderRadius: 6,
+              backgroundColor: `${COLORS.cyan}08`, border: `1px solid ${COLORS.cyan}15`,
+              fontSize: 11, color: COLORS.textSecondary,
+            }}>
+              <strong style={{ color: COLORS.textPrimary }}>Step 2:</strong> Paste the 6-digit code here
+              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                <input
+                  type="text"
+                  placeholder="000000"
+                  value={linkInput}
+                  onChange={(e) => {
+                    setLinkInput(e.target.value.replace(/\D/g, "").slice(0, 6));
+                    setLinkError(null);
+                  }}
+                  maxLength={6}
+                  style={{
+                    flex: 1, padding: "8px 10px", borderRadius: 6,
+                    backgroundColor: COLORS.bg, border: `1px solid ${COLORS.border}`,
+                    color: COLORS.textPrimary, fontSize: 18, fontFamily: "monospace",
+                    letterSpacing: "4px", textAlign: "center", outline: "none",
+                  }}
+                />
+                <button
+                  onClick={verifyCode}
+                  disabled={linkInput.length !== 6 || linkLoading}
+                  style={{
+                    padding: "8px 14px", borderRadius: 6,
+                    backgroundColor: linkInput.length === 6 ? COLORS.cyan : COLORS.border,
+                    color: linkInput.length === 6 ? COLORS.bg : COLORS.textMuted,
+                    border: "none", fontSize: 12,
+                    fontWeight: 600, cursor: linkInput.length === 6 ? "pointer" : "default",
+                  }}
+                >
+                  {linkLoading ? "..." : "Verify"}
+                </button>
+              </div>
+            </div>
+
+            {/* Error/success feedback */}
+            {linkError && (
+              <div style={{
+                marginTop: 6, padding: "6px 8px", borderRadius: 4,
+                backgroundColor: `${COLORS.red}15`, color: COLORS.red,
+                fontSize: 11,
+              }}>
+                ❌ {linkError}
+              </div>
+            )}
+            {linkSuccess && (
+              <div style={{
+                marginTop: 6, padding: "6px 8px", borderRadius: 4,
+                backgroundColor: `${COLORS.green}15`, color: COLORS.green,
+                fontSize: 11,
+              }}>
+                ✅ Successfully linked! Your scans are now synced.
+              </div>
+            )}
           </div>
         )}
+      </Section>
+
+      {/* Registration hint for non-TG users */}
+      <Section title="No Telegram?">
+        <div style={{
+          padding: 10, borderRadius: 8, backgroundColor: COLORS.bgCard,
+          fontSize: 11, color: COLORS.textSecondary, lineHeight: 1.5,
+        }}>
+          You can use Rug Munch Intelligence without Telegram — scanning works instantly with the free tier (10 scans/hr).
+          For more scans and portfolio alerts, create a free Telegram account and link it above.
+        </div>
       </Section>
 
       {/* Scanning Preferences */}
       <Section title="Scanning">
         <Toggle
           label="Auto-scan on supported pages"
-          description="Automatically scan tokens on DexScreener, Pump.fun, etc."
+          description="Automatically detect and scan tokens on DexScreener, Pump.fun, GMGN, BullX, Birdeye, Raydium, Jupiter, Photon"
           checked={settings.autoScan}
           onChange={() => toggleSetting("autoScan")}
         />
@@ -182,7 +264,7 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
         />
         <Toggle
           label="Swap warnings"
-          description="Warn before swapping into high-risk tokens on Jupiter"
+          description="Warn before swapping into high-risk tokens"
           checked={settings.swapWarnings}
           onChange={() => toggleSetting("swapWarnings")}
         />
@@ -199,7 +281,6 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
   );
 };
 
-// Sub-components
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
   <div style={{ marginBottom: 16 }}>
     <div style={{
@@ -224,12 +305,12 @@ const Toggle: React.FC<{
       marginBottom: 6, cursor: "pointer",
     }}
   >
-    <div>
+    <div style={{ flex: 1 }}>
       <div style={{ fontSize: 13, fontWeight: 500 }}>{label}</div>
       <div style={{ fontSize: 10, color: COLORS.textMuted, marginTop: 2 }}>{description}</div>
     </div>
     <div style={{
-      width: 36, height: 20, borderRadius: 10,
+      width: 36, height: 20, borderRadius: 10, flexShrink: 0, marginLeft: 8,
       backgroundColor: checked ? COLORS.purple : COLORS.border,
       position: "relative", transition: "all 0.2s",
     }}>
@@ -247,7 +328,7 @@ const TierBadge: React.FC<{ tier: string }> = ({ tier }) => {
   const tierConfig: Record<string, { label: string; color: string }> = {
     free: { label: "Free", color: COLORS.textMuted },
     free_linked: { label: "Linked", color: COLORS.cyan },
-    holder: { label: "$CRM", color: COLORS.gold },
+    holder: { label: "$CRM Holder", color: COLORS.gold },
     vip: { label: "VIP", color: COLORS.purple },
   };
   const { label, color } = tierConfig[tier] || tierConfig.free;

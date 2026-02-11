@@ -35,7 +35,6 @@ const SidePanel: React.FC = () => {
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const MSG_LIMIT = 20; // per hour
-  const HOLDER_TIERS = ["holder", "vip"];
 
   // Load state
   useEffect(() => {
@@ -182,7 +181,7 @@ const SidePanel: React.FC = () => {
   }, [input, loading, msgCount, detectedMint]);
 
   // Tier gate check
-  const hasAccess = HOLDER_TIERS.includes(tier) || tier === "free_linked";
+  const hasAccess = tier !== "free"; // Any linked user can access
 
   if (!hasAccess && !linked) {
     return (
@@ -195,7 +194,7 @@ const SidePanel: React.FC = () => {
         <div style={{ fontSize: 48, marginBottom: 16 }}>🗿</div>
         <h2 style={{ color: COLORS.gold, marginBottom: 8 }}>Marcus Chat</h2>
         <p style={{ color: COLORS.textSecondary, fontSize: 13, marginBottom: 20, maxWidth: 280 }}>
-          Link your Telegram account to chat with Marcus and get detailed token analysis.
+          Link your Telegram account to unlock Marcus Chat. Free scanning works in the popup — click the extension icon.
         </p>
         <button
           onClick={() => chrome.tabs.create({ url: "https://t.me/rug_munchy_bot?start=link_extension" })}
