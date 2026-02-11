@@ -1,0 +1,275 @@
+/**
+ * Extension Popup — Quick scan + account overview.
+ *
+ * Width: 380px, Height: ~520px
+ * Features:
+ * - Paste CA for instant scan
+ * - Current page auto-detection
+ * - Account tier display
+ * - Link to Telegram
+ * - Recent scans
+ */
+
+import React, { useState, useEffect, useCallback } from "react";
+import { scanToken, type ScanResult } from "../services/api";
+import { riskColor, riskLabel, riskEmoji, COLORS } from "../utils/designTokens";
+import { extractMintFromUrl } from "../utils/shadowInject";
+
+const Popup: React.FC = () => {
+  const [input, setInput] = useState("");
+  const [scanning, setScanning] = useState(false);
+  const [result, setResult] = useState<ScanResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [tier, setTier] = useState("free");
+  const [scanCount, setScanCount] = useState(0);
+  const [linked, setLinked] = useState(false);
+  const [activeTabMint, setActiveTabMint] = useState<string | null>(null);
+
+  // Load state
+  useEffect(() => {
+    chrome.storage.local.get(["tier", "scan_count", "linked_telegram"], (data) => {
+      setTier(data.tier || "free");
+      setScanCount(data.scan_count || 0);
+      setLinked(!!data.linked_telegram);
+    });
+
+    // Detect mint from active tab
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]?.url) {
+        const mint = extractMintFromUrl(tabs[0].url);
+        if (mint) {
+          setActiveTabMint(mint);
+          setInput(mint);
+        }
+      }
+    });
+  }, []);
+
+  const handleScan = useCallback(async () => {
+    const mint = input.trim();
+    if (!mint || mint.length < 32) {
+      setError("Enter a valid Solana contract address");
+      return;
+    }
+
+    setScanning(true);
+    setError(null);
+    setResult(null);
+
+    const resp = await scanToken(mint);
+    if (resp.success && resp.data) {
+      setResult(resp.data);
+      setScanCount((c) => c + 1);
+      chrome.storage.local.set({ scan_count: scanCount + 1 });
+    } else {
+      setError(resp.error || "Scan failed");
+    }
+    setScanning(false);
+  }, [input, scanCount]);
+
+  const tierLabel = {
+    free: "Free (10/hr)",
+    free_linked: "Free Linked (30/hr)",
+    holder: "$CRM Holder (100/hr)",
+    vip: "VIP (Unlimited)",
+  }[tier] || "Free";
+
+  return (
+    <div style={{
+      width: 380, minHeight: 480,
+      backgroundColor: COLORS.bg,
+      color: COLORS.textPrimary,
+      fontFamily: "system-ui, -apple-system, sans-serif",
+      padding: 16,
+    }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 20 }}>🗿</span>
+          <span style={{ fontWeight: 700, fontSize: 16, color: COLORS.gold }}>Rug Munch</span>
+        </div>
+        <span style={{
+          fontSize: 10, padding: "2px 8px", borderRadius: 10,
+          backgroundColor: `${COLORS.purple}30`, color: COLORS.purpleLight,
+        }}>
+          {tierLabel}
+        </span>
+      </div>
+
+      {/* Scan Input */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{
+          display: "flex", gap: 6,
+          backgroundColor: COLORS.bgCard,
+          borderRadius: 10, border: `1px solid ${COLORS.border}`,
+          padding: 4,
+        }}>
+          <input
+            type="text"
+            placeholder="Paste Solana contract address..."
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleScan()}
+            style={{
+              flex: 1, padding: "8px 10px",
+              backgroundColor: "transparent", border: "none", outline: "none",
+              color: COLORS.textPrimary, fontSize: 12,
+              fontFamily: "monospace",
+            }}
+          />
+          <button
+            onClick={handleScan}
+            disabled={scanning}
+            style={{
+              padding: "8px 16px", borderRadius: 8,
+              backgroundColor: scanning ? COLORS.border : COLORS.purple,
+              color: "#fff", border: "none", fontSize: 12,
+              fontWeight: 600, cursor: scanning ? "wait" : "pointer",
+              transition: "all 0.2s",
+            }}
+          >
+            {scanning ? "..." : "Scan"}
+          </button>
+        </div>
+        {activeTabMint && input === activeTabMint && (
+          <div style={{ fontSize: 10, color: COLORS.textMuted, marginTop: 4, paddingLeft: 4 }}>
+            📍 Detected from current page
+          </div>
+        )}
+      </div>
+
+      {/* Error */}
+      {error && (
+        <div style={{
+          padding: 10, borderRadius: 8,
+          backgroundColor: `${COLORS.red}15`, border: `1px solid ${COLORS.red}30`,
+          color: COLORS.red, fontSize: 12, marginBottom: 12,
+        }}>
+          {error}
+        </div>
+      )}
+
+      {/* Scan Result */}
+      {result && <ScanResultCard result={result} />}
+
+      {/* Footer */}
+      <div style={{
+        position: "absolute", bottom: 16, left: 16, right: 16,
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+      }}>
+        {!linked ? (
+          <button
+            onClick={() => chrome.tabs.create({ url: "https://t.me/rug_munchy_bot?start=link_extension" })}
+            style={{
+              padding: "6px 12px", borderRadius: 6,
+              backgroundColor: `${COLORS.cyan}20`, border: `1px solid ${COLORS.cyan}40`,
+              color: COLORS.cyan, fontSize: 11, cursor: "pointer",
+            }}
+          >
+            🔗 Link Telegram
+          </button>
+        ) : (
+          <span style={{ fontSize: 10, color: COLORS.green }}>✓ Telegram linked</span>
+        )}
+        <span style={{ fontSize: 10, color: COLORS.textMuted }}>
+          {scanCount} scans today
+        </span>
+      </div>
+    </div>
+  );
+};
+
+const ScanResultCard: React.FC<{ result: ScanResult }> = ({ result }) => {
+  const color = riskColor(result.risk_score);
+  const label = riskLabel(result.risk_score);
+  const emoji = riskEmoji(result.risk_score);
+
+  return (
+    <div style={{
+      padding: 14, borderRadius: 10,
+      backgroundColor: COLORS.bgCard,
+      border: `1px solid ${color}40`,
+    }}>
+      {/* Token header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>
+            {result.token_symbol || "Unknown"}
+          </div>
+          <div style={{ fontSize: 11, color: COLORS.textSecondary }}>
+            {result.token_name || "Unknown Token"}
+          </div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color }}>{emoji} {result.risk_score}</div>
+          <div style={{ fontSize: 10, color }}>{label} Risk</div>
+        </div>
+      </div>
+
+      {/* Risk bar */}
+      <div style={{
+        width: "100%", height: 6,
+        backgroundColor: COLORS.border, borderRadius: 3, marginBottom: 12,
+      }}>
+        <div style={{
+          width: `${result.risk_score}%`, height: "100%",
+          backgroundColor: color, borderRadius: 3,
+          transition: "width 0.5s",
+        }} />
+      </div>
+
+      {/* Metrics grid */}
+      <div style={{
+        display: "grid", gridTemplateColumns: "1fr 1fr",
+        gap: 8, fontSize: 11,
+      }}>
+        <MetricRow label="Price" value={`$${result.price_usd?.toFixed(6) || "—"}`} />
+        <MetricRow label="Market Cap" value={formatUsd(result.market_cap)} />
+        <MetricRow label="Liquidity" value={formatUsd(result.liquidity_usd)} />
+        <MetricRow label="Holders" value={result.holder_count?.toLocaleString() || "—"} />
+        <MetricRow label="Top 10 %" value={`${result.top_10_holder_percent?.toFixed(1) || "—"}%`} />
+        <MetricRow label="Age" value={result.created_at || "—"} />
+      </div>
+
+      {/* Risk factors */}
+      {result.risk_factors?.length > 0 && (
+        <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${COLORS.border}` }}>
+          <div style={{ fontSize: 10, color: COLORS.textMuted, marginBottom: 4 }}>Risk Factors:</div>
+          {result.risk_factors.slice(0, 4).map((f, i) => (
+            <div key={i} style={{ fontSize: 11, color: COLORS.textSecondary, paddingLeft: 8 }}>
+              • {f}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Full address */}
+      <div style={{
+        marginTop: 10, paddingTop: 8, borderTop: `1px solid ${COLORS.border}`,
+        fontSize: 9, fontFamily: "monospace", color: COLORS.textMuted,
+        wordBreak: "break-all", cursor: "pointer",
+      }}
+        onClick={() => navigator.clipboard.writeText(result.token_address)}
+        title="Click to copy"
+      >
+        {result.token_address}
+      </div>
+    </div>
+  );
+};
+
+const MetricRow: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+  <div style={{ display: "flex", justifyContent: "space-between" }}>
+    <span style={{ color: COLORS.textMuted }}>{label}</span>
+    <span style={{ color: COLORS.textPrimary, fontWeight: 500 }}>{value}</span>
+  </div>
+);
+
+function formatUsd(value: number | undefined): string {
+  if (!value) return "—";
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
+  return `$${value.toFixed(2)}`;
+}
+
+export default Popup;

@@ -1,0 +1,66 @@
+{
+  "manifest_version": 3,
+  "name": "Rug Munch Scanner",
+  "description": "Real-time rug pull detection for Solana tokens. Risk badges on DexScreener, Pump.fun, Jupiter, and more.",
+  "version": "0.1.0",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": [
+    "storage",
+    "activeTab",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "https://dexscreener.com/*",
+    "https://pump.fun/*",
+    "https://jup.ag/*",
+    "https://raydium.io/*",
+    "https://birdeye.so/*",
+    "https://bullx.io/*",
+    "https://gmgn.ai/*",
+    "https://cryptorugmunch.com/*",
+    "https://cryptorugmunch.ngrok.app/*"
+  ],
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    }
+  },
+  "background": {
+    "service_worker": "src/background/index.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://dexscreener.com/*"],
+      "js": ["src/content/dexscreener.tsx"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://pump.fun/*"],
+      "js": ["src/content/pumpfun.tsx"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://jup.ag/*"],
+      "js": ["src/content/jupiter.tsx"],
+      "run_at": "document_idle"
+    }
+  ],
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
