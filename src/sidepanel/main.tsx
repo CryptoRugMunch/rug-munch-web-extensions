@@ -168,35 +168,7 @@ const SidePanel: React.FC = () => {
     } else if (lastScanResult) {
       // Any non-scan message when we have context = question about the last scanned token
       const d = lastScanResult;
-      let followup = `**More on ${d.token_symbol || "this token"}:**\n\n`;
-
-      if (d.top_10_holder_percent) {
-        const conc = d.top_10_holder_percent;
-        followup += `📊 **Holder Concentration:** Top 10 hold ${conc.toFixed(1)}%\n`;
-        if (conc > 80) followup += `→ Extremely concentrated. One wallet dumps = your bags are empty.\n`;
-        else if (conc > 50) followup += `→ High concentration. Watch for coordinated selling.\n`;
-        else if (conc > 30) followup += `→ Moderate concentration. Not great, not terrible.\n`;
-        else followup += `→ Well distributed. Good sign for organic growth.\n`;
-      }
-
-      if (d.liquidity_usd) {
-        followup += `\n💧 **Liquidity:** ${formatUsd(d.liquidity_usd)}\n`;
-        if (d.liquidity_usd < 5000) followup += `→ Extremely thin. A $500 sell crashes this.\n`;
-        else if (d.liquidity_usd < 25000) followup += `→ Thin liquidity. Slippage will be painful on any real size.\n`;
-        else if (d.liquidity_usd < 100000) followup += `→ Acceptable for a micro-cap. Don't ape your life savings.\n`;
-        else followup += `→ Decent liquidity depth.\n`;
-      }
-
-      if (d.market_cap && d.liquidity_usd) {
-        const ratio = d.market_cap / d.liquidity_usd;
-        followup += `\n📐 **MCap/Liq Ratio:** ${ratio.toFixed(1)}x`;
-        if (ratio > 50) followup += ` — extremely overvalued relative to liquidity. Rug risk HIGH.`;
-        else if (ratio > 20) followup += ` — stretched. Watch for LP pulls.`;
-        else followup += ` — within normal range.`;
-      }
-
-      followup += `\n\nFor the full deep dive with holder bubblemap, wallet DNA, and flow analysis — scan via @rug_munchy_bot on Telegram. That's where the real intel lives. 🗿`;
-      addMessage("marcus", followup);
+      addMessage("marcus", analyzeWithContext(text, d));
     } else {
       // General chat
       addMessage("marcus", generateResponse(text, detectedMint, lastScanResult));
@@ -411,6 +383,82 @@ function formatMarkdown(text: string): React.ReactNode {
 }
 
 // ─── Response Generator ─────────────────────────────────────────
+
+
+// Scan-context-aware response — uses actual scan data + user's question
+function analyzeWithContext(question: string, d: ScanResult): string {
+  const lower = question.toLowerCase();
+  const score = d.risk_score ?? 0;
+  const symbol = d.token_symbol || "this token";
+  const conc = d.top_10_holder_percent || 0;
+  const liq = d.liquidity_usd || 0;
+  const mcap = d.market_cap || 0;
+  const holders = d.holder_count || 0;
+  const ratio = liq > 0 ? mcap / liq : 0;
+  const factors = d.risk_factors || [];
+
+  if (/trend|pattern|weird|suspicious|red.?flag|concern|issue|problem|smell|fishy|off|dodgy|strange/.test(lower)) {
+    let out = `**Observations on ${symbol}:**\n\n`;
+    const flags: string[] = [];
+    if (conc > 50) flags.push(`🚩 Top 10 control ${conc.toFixed(1)}% — very concentrated`);
+    else if (conc > 30) flags.push(`⚠️ Top 10 hold ${conc.toFixed(1)}% — moderate concentration`);
+    if (liq < 10000) flags.push(`🚩 Liquidity only ${formatUsd(liq)} — extremely thin`);
+    else if (liq < 50000) flags.push(`⚠️ Liquidity ${formatUsd(liq)} — watch for LP pulls`);
+    if (ratio > 50) flags.push(`🚩 MCap/Liq ${ratio.toFixed(1)}x — massively overvalued`);
+    else if (ratio > 20) flags.push(`⚠️ MCap/Liq ${ratio.toFixed(1)}x — stretched`);
+    if (holders < 100) flags.push(`🚩 Only ${holders} holders`);
+    else if (holders < 500) flags.push(`⚠️ ${holders} holders — still early`);
+    factors.forEach(f => flags.push(`⚠️ ${f}`));
+    if (flags.length === 0) {
+      out += `Nothing immediately alarming. Ratio ${ratio.toFixed(1)}x, ${holders.toLocaleString()} holders, top 10 at ${conc.toFixed(1)}%.\nBut absence of red flags ≠ safe.`;
+    } else {
+      flags.forEach(f => { out += `${f}\n`; });
+      const critCount = flags.filter(f => f.startsWith("🚩")).length;
+      out += `\n${critCount >= 2 ? "*Multiple red flags. I'd walk away.*" : "*Some concerns. Set stop-losses.*"}`;
+    }
+    return out + `\n\n*"The impediment to action advances action."* 🗿`;
+  }
+
+  if (/opinion|buy|ape|invest|worth|should|entry|good |bad /.test(lower)) {
+    let v = "";
+    if (score >= 75) v = `At ${score}/100, this is a **hard no**. Multiple critical flags.`;
+    else if (score >= 50) v = `Risk ${score}/100 — **high caution**. Not terrible but not reassuring.`;
+    else if (score >= 25) v = `${score}/100 — moderate. Liq ${formatUsd(liq)}, ${holders.toLocaleString()} holders. ${conc > 40 ? "Concentration concerns me." : "Distribution okay."}`;
+    else v = `${score}/100 — relatively clean. Liq ${formatUsd(liq)}, ${holders.toLocaleString()} holders.`;
+    return `**My read on ${symbol}:**\n\n${v}\n\n*I give data, not financial advice.* 🗿`;
+  }
+
+  if (/holder|whale|distribution|who|wallet|top/.test(lower)) {
+    let out = `**${symbol} Holders:**\n\n📊 Top 10: ${conc.toFixed(1)}% | Total: ${holders.toLocaleString()}\n\n`;
+    if (conc > 50) out += `High concentration. Watch for coordinated selling.`;
+    else if (conc > 30) out += `Moderate. Not ideal but not a deal-breaker.`;
+    else out += `Well distributed. Organic growth territory.`;
+    return out + `\n\nFull bubblemap on Telegram @rug_munchy_bot 🗿`;
+  }
+
+  if (/liq|pool|lp|depth|slip/.test(lower)) {
+    let out = `**${symbol} Liquidity:**\n\n💧 Pool: ${formatUsd(liq)} | MCap/Liq: ${ratio.toFixed(1)}x\n\n`;
+    if (liq < 5000) out += `Dangerously thin.`;
+    else if (liq < 25000) out += `Thin. Slippage hurts on size.`;
+    else if (liq < 100000) out += `Acceptable for micro-cap.`;
+    else out += `Decent depth.`;
+    if (ratio > 30) out += `\n\n⚠️ Ratio ${ratio.toFixed(1)}x — stretched.`;
+    return out;
+  }
+
+  if (/price|value|market.?cap|mcap|cost/.test(lower)) {
+    return `**${symbol} Valuation:**\n\n💰 Price: $${d.price_usd ? formatPrice(d.price_usd) : "—"}\n📊 MCap: ${formatUsd(mcap)}\n💧 Liq: ${formatUsd(liq)}\n📐 Ratio: ${ratio.toFixed(1)}x`;
+  }
+
+  // Catch-all: any other question about the token
+  let out = `**Re: ${symbol}** (risk ${score}/100)\n\n`;
+  out += `• Price: $${d.price_usd ? formatPrice(d.price_usd) : "—"} | MCap: ${formatUsd(mcap)}\n`;
+  out += `• Liq: ${formatUsd(liq)} (${ratio.toFixed(1)}x) | Holders: ${holders.toLocaleString()}\n`;
+  out += `• Top 10: ${conc.toFixed(1)}%\n`;
+  if (factors.length > 0) out += `\n⚠️ ${factors.slice(0, 3).join(", ")}\n`;
+  out += `\nAsk about **trends**, **holders**, **liquidity**, or **should I buy**. 🗿`;
+  return out;
+}
 
 function generateResponse(text: string, detectedMint: string | null, lastScan: ScanResult | null): string {
   const lower = text.toLowerCase();
