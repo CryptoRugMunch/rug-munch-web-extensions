@@ -51,10 +51,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Clean up old IndexedDB cache entries periodically (every 6 hours)
 chrome.alarms.create("cache-cleanup", { periodInMinutes: 360 });
-chrome.alarms.onAlarm.addListener((alarm) => {
+chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === "cache-cleanup") {
-    // Content scripts handle their own cleanup
-    console.log("[RMS] Cache cleanup alarm fired");
+    try {
+      // Clean up old IndexedDB entries (> 24 hours)
+      const DB_NAME = "rugmunch_cache";
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onsuccess = () => {
+        const db = req.result;
+        const tx = db.transaction("scans", "readwrite");
+        const store = tx.objectStore("scans");
+        const getAllReq = store.getAll();
+        getAllReq.onsuccess = () => {
+          const now = Date.now();
+          const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+          for (const entry of getAllReq.result) {
+            if (now - entry.timestamp > maxAge) {
+              store.delete(entry.mint);
+            }
+          }
+        };
+      };
+      console.log("[RMS] Cache cleanup completed");
+    } catch (e) {
+      console.error("[RMS] Cache cleanup error:", e);
+    }
   }
 });
 

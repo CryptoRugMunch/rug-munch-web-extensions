@@ -11,11 +11,13 @@
  */
 
 import React, { useState, useEffect, useCallback } from "react";
+import Settings from "./Settings";
 import { scanToken, type ScanResult } from "../services/api";
 import { riskColor, riskLabel, riskEmoji, COLORS } from "../utils/designTokens";
 import { extractMintFromUrl } from "../utils/shadowInject";
 
 const Popup: React.FC = () => {
+  const [view, setView] = useState<"main" | "settings">("main");
   const [input, setInput] = useState("");
   const [scanning, setScanning] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
@@ -74,6 +76,10 @@ const Popup: React.FC = () => {
     vip: "VIP (Unlimited)",
   }[tier] || "Free";
 
+  if (view === "settings") {
+    return <Settings onBack={() => setView("main")} />;
+  }
+
   return (
     <div style={{
       width: 380, minHeight: 480,
@@ -88,12 +94,24 @@ const Popup: React.FC = () => {
           <span style={{ fontSize: 20 }}>🗿</span>
           <span style={{ fontWeight: 700, fontSize: 16, color: COLORS.gold }}>Rug Munch</span>
         </div>
-        <span style={{
-          fontSize: 10, padding: "2px 8px", borderRadius: 10,
-          backgroundColor: `${COLORS.purple}30`, color: COLORS.purpleLight,
-        }}>
-          {tierLabel}
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{
+            fontSize: 10, padding: "2px 8px", borderRadius: 10,
+            backgroundColor: `${COLORS.purple}30`, color: COLORS.purpleLight,
+          }}>
+            {tierLabel}
+          </span>
+          <button
+            onClick={() => setView("settings")}
+            style={{
+              background: "none", border: "none", color: COLORS.textSecondary,
+              cursor: "pointer", fontSize: 14, padding: 2,
+            }}
+            title="Settings"
+          >
+            ⚙️
+          </button>
+        </div>
       </div>
 
       {/* Scan Input */}

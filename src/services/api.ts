@@ -5,7 +5,15 @@
  * Cache-first with stale-while-revalidate pattern via IndexedDB.
  */
 
-const API_BASE = "https://cryptorugmunch.ngrok.app/api";
+import { getApiBase } from "../utils/config";
+
+let _apiBaseCache: string | null = null;
+async function getApiBaseUrl(): Promise<string> {
+  if (!_apiBaseCache) {
+    _apiBaseCache = await getApiBase();
+  }
+  return _apiBaseCache;
+}
 
 export interface ScanResult {
   token_address: string;
@@ -91,7 +99,7 @@ export async function scanToken(mint: string, chain = "solana"): Promise<ExtScan
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
-    const resp = await fetch(`${API_BASE}/ext/scan`, {
+    const resp = await fetch(`${await getApiBaseUrl()}/ext/scan`, {
       method: "POST",
       headers,
       body: JSON.stringify({ token_address: mint, chain }),
@@ -126,7 +134,7 @@ export async function batchScan(mints: string[], chain = "solana"): Promise<Batc
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
-    const resp = await fetch(`${API_BASE}/ext/batch`, {
+    const resp = await fetch(`${await getApiBaseUrl()}/ext/batch`, {
       method: "POST",
       headers,
       body: JSON.stringify({ tokens: mints, chain }),
