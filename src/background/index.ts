@@ -150,22 +150,57 @@ async function syncTier(): Promise<void> {
 
     const base = await getApiBase();
 
-    // Try /api/ext/me first (wallet auth users)
-    let resp = await fetch(`${base}/ext/me`, {
-      headers: { "Authorization": `Bearer ${token}` },
-    });
+    // Step 1: Auth refresh — handles token migration (e.g. old TG link token → canonical wallet token)
+    try {
+      // Include linked_telegram as fallback for when old token no longer exists in DB
+      const tgId = data.linked_telegram || "";
+      const refreshUrl = tgId 
+        ? `${base}/ext/auth/refresh?telegram_id=${tgId}` 
+        : `${base}/ext/auth/refresh`;
+      const refreshResp = await fetch(refreshUrl, {
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+      if (refreshResp.ok) {
+        const refresh = await refreshResp.json();
+        if (refresh.authenticated) {
+          const updates: Record<string, unknown> = {};
 
-    if (resp.ok) {
-      const user = await resp.json();
-      if (user.tier && user.tier !== data.tier) {
-        console.log(`[RMS] Tier sync: ${data.tier} → ${user.tier}`);
-        await chrome.storage.local.set({ tier: user.tier });
+          // Migrate auth token if it changed (merged identity)
+          if (refresh.auth_token && refresh.auth_token !== token) {
+            console.log(`[RMS] Token migrated: old=${token.slice(0,8)}… → new=${refresh.auth_token.slice(0,8)}…`);
+            updates.auth_token = refresh.auth_token;
+          }
+
+          // Sync tier
+          if (refresh.tier && refresh.tier !== data.tier) {
+            console.log(`[RMS] Tier sync: ${data.tier} → ${refresh.tier}`);
+            updates.tier = refresh.tier;
+          }
+
+          // Sync telegram link info
+          if (refresh.telegram_id) {
+            updates.linked_telegram = refresh.telegram_id;
+          }
+
+          if (Object.keys(updates).length > 0) {
+            await chrome.storage.local.set(updates);
+
+            // Also update the account object
+            const acctResult = await chrome.storage.local.get("account");
+            const acct = acctResult.account || {};
+            if (updates.auth_token) acct.authToken = updates.auth_token;
+            if (updates.tier) acct.tier = updates.tier;
+            if (updates.linked_telegram) acct.telegramId = updates.linked_telegram;
+            await chrome.storage.local.set({ account: acct });
+          }
+          return; // refresh handled everything
+        }
       }
-      return;
+    } catch {
+      // /auth/refresh not available — fall through to legacy sync
     }
 
-    // Fallback: check extension_links via a lightweight endpoint
-    // If /me fails (404 = wallet-only user), check linked telegram tier
+    // Legacy fallback: direct tier check
     const resp2 = await fetch(`${base}/ext/tier`, {
       headers: { "Authorization": `Bearer ${token}` },
     });
@@ -173,7 +208,7 @@ async function syncTier(): Promise<void> {
     if (resp2.ok) {
       const result = await resp2.json();
       if (result.tier && result.tier !== data.tier) {
-        console.log(`[RMS] Tier sync (link): ${data.tier} → ${result.tier}`);
+        console.log(`[RMS] Tier sync (fallback): ${data.tier} → ${result.tier}`);
         await chrome.storage.local.set({ tier: result.tier });
       }
     }
