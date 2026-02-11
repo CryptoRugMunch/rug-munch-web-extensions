@@ -53,6 +53,15 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
   useEffect(() => {
     getSettings().then(setSettings);
     getAccount().then(setAccount);
+
+    // Listen for background tier sync updates
+    const listener = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
+      if (area === "local" && (changes.tier || changes.auth_token || changes.account)) {
+        getAccount().then(setAccount);
+      }
+    };
+    chrome.storage.onChanged.addListener(listener);
+    return () => chrome.storage.onChanged.removeListener(listener);
   }, []);
 
   // Load wallets when logged in
@@ -516,7 +525,12 @@ const TierBadge: React.FC<{ tier: string }> = ({ tier }) => {
   const cfg: Record<string, { label: string; color: string }> = {
     free: { label: "Free", color: COLORS.textMuted },
     free_linked: { label: "Linked", color: COLORS.cyan },
-    holder: { label: "$CRM Holder", color: COLORS.gold },
+    holder: { label: "Holder", color: COLORS.gold },
+    scout: { label: "Scout", color: COLORS.cyan },
+    whale: { label: "Whale", color: "#5FDDE7" },
+    analyst: { label: "Analyst", color: COLORS.purple },
+    syndicate: { label: "Syndicate", color: "#E7C55F" },
+    og: { label: "OG", color: "#FFD700" },
     vip: { label: "VIP", color: COLORS.purple },
   };
   const { label, color } = cfg[tier] || cfg.free;

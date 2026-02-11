@@ -144,7 +144,7 @@ async function getApiBase(): Promise<string> {
 
 async function syncTier(): Promise<void> {
   try {
-    const data = await chrome.storage.local.get(["auth_token", "tier"]);
+    const data = await chrome.storage.local.get(["auth_token", "tier", "linked_telegram"]);
     const token = data.auth_token;
     if (!token) return; // Not signed in
 

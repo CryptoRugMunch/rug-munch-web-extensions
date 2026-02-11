@@ -106,9 +106,14 @@ const Popup: React.FC = () => {
   }, [input, scanCount]);
 
   const tierLabel = {
-    free: "Free (10/hr)",
-    free_linked: "Linked (30/hr)",
-    holder: "$CRM (100/hr)",
+    free: "Free (3/day)",
+    free_linked: "Linked (3/day)",
+    holder: "Holder (15/day)",
+    scout: "Scout (30/day)",
+    whale: "Whale ∞",
+    analyst: "Analyst ∞",
+    syndicate: "Syndicate ∞",
+    og: "OG ∞",
     vip: "VIP ∞",
   }[tier] || "Free";
 
