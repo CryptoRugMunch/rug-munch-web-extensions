@@ -193,7 +193,7 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
         textAlign: "center", fontSize: 10, color: COLORS.textMuted,
         marginTop: 20, paddingTop: 10, borderTop: `1px solid ${COLORS.border}`,
       }}>
-        Rug Munch Scanner v{chrome.runtime.getManifest().version} • 🗿
+        Rug Munch Intelligence v{chrome.runtime.getManifest().version} • 🗿
       </div>
     </div>
   );

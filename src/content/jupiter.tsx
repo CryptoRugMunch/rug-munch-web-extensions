@@ -48,7 +48,7 @@ async function checkSwapTarget() {
   `;
   const emoji = isCritical ? "🚨" : "⚠️";
   warning.innerHTML = `
-    ${emoji} <strong>Rug Munch Warning:</strong> $${token_symbol || 'Unknown'} has a risk score of
+    ${emoji} <strong>Rug Munch Intelligence:</strong> $${token_symbol || 'Unknown'} has a risk score of
     <strong>${risk_score}/100</strong>.
     ${isCritical ? 'This token shows critical rug indicators.' : 'Exercise caution with this swap.'}
   `;

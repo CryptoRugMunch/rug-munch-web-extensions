@@ -33,7 +33,7 @@ export const RiskBadge: React.FC<RiskBadgeProps> = ({
   if (compact) {
     return (
       <span
-        title={`Rug Munch Risk: ${score}/100 (${label})`}
+        title={`Rug Munch Intelligence: ${score}/100 (${label})`}
         style={{
           display: "inline-flex",
           alignItems: "center",

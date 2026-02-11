@@ -18,7 +18,7 @@ interface OnboardingProps {
 const STEPS = [
   {
     emoji: "🗿",
-    title: "Welcome to Rug Munch",
+    title: "Welcome to Rug Munch Intelligence",
     description: "Real-time rug pull detection for Solana tokens. We scan tokens so you don't get rugged.",
     detail: "Risk badges appear automatically on DexScreener, Pump.fun, and Jupiter.",
   },

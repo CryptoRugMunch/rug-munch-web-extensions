@@ -13,6 +13,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createRoot } from "react-dom/client";
 import { scanToken, type ScanResult } from "../services/api";
+import { trackSidePanelOpen } from "../services/analytics";
 import { riskLabel, riskEmoji, COLORS } from "../utils/designTokens";
 import { extractMintFromUrl } from "../utils/shadowInject";
 
@@ -49,6 +50,7 @@ const SidePanel: React.FC = () => {
       content: "Welcome, fellow degen. I'm Marcus — your on-chain Stoic. Paste a contract address or ask me about any token on the current page. I'll give you the unfiltered truth. 🗿",
       timestamp: Date.now(),
     }]);
+    trackSidePanelOpen();
   }, []);
 
   // Detect mint from active tab

@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Rug Munch Scanner",
+  "name": "Rug Munch Intelligence",
   "description": "Real-time rug pull detection for Solana tokens. Risk badges on DexScreener, Pump.fun, Jupiter, GMGN, BullX, Birdeye, and more.",
   "version": "0.2.0",
   "icons": {

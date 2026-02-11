@@ -14,6 +14,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import Settings from "./Settings";
 import Onboarding from "./Onboarding";
 import { scanToken, type ScanResult, type ExtScanResponse } from "../services/api";
+import { trackScan } from "../services/analytics";
 import { riskColor, riskLabel, riskEmoji, COLORS } from "../utils/designTokens";
 import { extractMintFromUrl } from "../utils/shadowInject";
 
@@ -91,6 +92,7 @@ const Popup: React.FC = () => {
         setNotScanned(true);
       } else {
         setResult(resp.data);
+        trackScan(mint, "popup");
       }
       setScanCount((c) => c + 1);
       chrome.storage.local.set({ scan_count: scanCount + 1 });
@@ -131,7 +133,7 @@ const Popup: React.FC = () => {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 20 }}>🗿</span>
-          <span style={{ fontWeight: 700, fontSize: 16, color: COLORS.gold }}>Rug Munch</span>
+          <span style={{ fontWeight: 700, fontSize: 16, color: COLORS.gold }}>Rug Munch Intelligence</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{
@@ -378,7 +380,7 @@ const ScanResultCard: React.FC<{ result: ScanResult }> = ({ result }) => {
       <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${COLORS.border}` }}>
         <button
           onClick={() => {
-            const shareText = `${emoji} $${result.token_symbol || "?"} Risk: ${score ?? "?"}/100 (${label})\nPrice: ${result.price_usd ? `$${formatPrice(result.price_usd)}` : "—"} | Liq: ${formatUsd(result.liquidity_usd)}\nScanned by Rug Munch 🗿 https://t.me/rug_munchy_bot`;
+            const shareText = `${emoji} $${result.token_symbol || "?"} Risk: ${score ?? "?"}/100 (${label})\nPrice: ${result.price_usd ? `$${formatPrice(result.price_usd)}` : "—"} | Liq: ${formatUsd(result.liquidity_usd)}\nScanned by Rug Munch Intelligence 🗿 https://t.me/rug_munchy_bot`;
             navigator.clipboard.writeText(shareText);
           }}
           style={{

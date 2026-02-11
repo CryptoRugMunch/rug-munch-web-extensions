@@ -93,7 +93,7 @@ chrome.runtime.onInstalled.addListener((details) => {
   // Context menu — right-click to scan selected text
   chrome.contextMenus?.create?.({
     id: "scan-selected",
-    title: "🗿 Scan with Rug Munch",
+    title: "🗿 Scan with Rug Munch Intelligence",
     contexts: ["selection"],
   });
 

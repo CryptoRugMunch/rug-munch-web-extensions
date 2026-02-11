@@ -77,7 +77,7 @@ function injectWarningBanner(score: number) {
     font-weight: 600; z-index: 99999; position: relative;
   `;
   const emoji = score >= 75 ? "🚨" : "⚠️";
-  banner.innerHTML = `${emoji} Rug Munch: Risk score <strong>${score}/100</strong> — proceed with caution.`;
+  banner.innerHTML = `${emoji} Rug Munch Intelligence: Risk score <strong>${score}/100</strong> — proceed with caution.`;
 
   const close = document.createElement("span");
   close.textContent = "✕";
