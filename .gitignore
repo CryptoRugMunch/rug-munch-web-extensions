@@ -7,3 +7,4 @@ dist/
 *.tsbuildinfo
 src/**/*.js
 dist-firefox/
+firebase-debug.log
