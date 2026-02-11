@@ -6,3 +6,4 @@ dist/
 .DS_Store
 *.tsbuildinfo
 src/**/*.js
+dist-firefox/
