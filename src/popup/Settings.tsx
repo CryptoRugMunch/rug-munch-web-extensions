@@ -9,7 +9,7 @@
  * Zero manual code paste.
  */
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { COLORS } from "../utils/designTokens";
 import {
   getSettings, updateSettings, type ExtensionSettings,
@@ -20,25 +20,20 @@ import {
   listWallets, addWallet, removeWallet,
   type WalletInfo,
 } from "../services/walletAuth";
-import { initLink, checkLinkStatus } from "../services/api";
+import { useAutoLink } from "../hooks/useAutoLink";
 
 interface SettingsProps {
   onBack: () => void;
 }
 
-const POLL_INTERVAL = 2500; // 2.5s
-const POLL_TIMEOUT = 600_000; // 10 min (matches token TTL)
 
 const Settings: React.FC<SettingsProps> = ({ onBack }) => {
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
   const [account, setAccount] = useState<AccountState | null>(null);
   const [wallets, setWallets] = useState<WalletInfo[]>([]);
 
-  // Telegram auto-link state
-  const [linkPhase, setLinkPhase] = useState<"idle" | "waiting" | "success" | "error">("idle");
-  const [linkError, setLinkError] = useState<string | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pollStartRef = useRef<number>(0);
+  // Telegram auto-link (shared hook)
+  const autoLink = useAutoLink();
 
   // Wallet auth state
   const [walletLoading, setWalletLoading] = useState(false);
@@ -58,13 +53,6 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
   useEffect(() => {
     getSettings().then(setSettings);
     getAccount().then(setAccount);
-  }, []);
-
-  // Clean up polling on unmount
-  useEffect(() => {
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
   }, []);
 
   // Load wallets when logged in
@@ -120,75 +108,6 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
     setWalletLoading(false);
   }, [walletInput, account]);
 
-  // ─── Telegram Auto-Link ───────────────────────────────────────
-  const startAutoLink = useCallback(async () => {
-    setLinkPhase("waiting");
-    setLinkError(null);
-
-    // 1. Get link token from API
-    const extensionId = typeof chrome !== "undefined" ? chrome.runtime?.id || "" : "";
-    const init = await initLink(extensionId);
-    if (!init) {
-      setLinkPhase("error");
-      setLinkError("Couldn't connect to API. Is the service running?");
-      return;
-    }
-
-    // 2. Open bot deep link in a new tab
-    chrome.tabs.create({ url: init.bot_url });
-
-    // 3. Start polling for verification
-    pollStartRef.current = Date.now();
-    if (pollRef.current) clearInterval(pollRef.current);
-
-    pollRef.current = setInterval(async () => {
-      // Timeout check
-      if (Date.now() - pollStartRef.current > POLL_TIMEOUT) {
-        if (pollRef.current) clearInterval(pollRef.current);
-        pollRef.current = null;
-        setLinkPhase("error");
-        setLinkError("Link expired. Please try again.");
-        return;
-      }
-
-      const status = await checkLinkStatus(init.link_token);
-
-      if (status.status === "verified") {
-        // Success!
-        if (pollRef.current) clearInterval(pollRef.current);
-        pollRef.current = null;
-
-        const updated = await updateAccount({
-          tier: status.tier as any || "free_linked",
-          telegramId: status.telegram_id || null,
-          telegramUsername: status.telegram_username || null,
-          linkedAt: new Date().toISOString(),
-          authToken: status.auth_token || account?.authToken || null,
-        });
-        setAccount(updated);
-        chrome.storage.local.set({
-          tier: status.tier || "free_linked",
-          linked_telegram: status.telegram_id,
-          auth_token: status.auth_token || "",
-        });
-        setLinkPhase("success");
-        setTimeout(() => setLinkPhase("idle"), 4000);
-      } else if (status.status === "expired") {
-        if (pollRef.current) clearInterval(pollRef.current);
-        pollRef.current = null;
-        setLinkPhase("error");
-        setLinkError("Link expired. Please try again.");
-      }
-      // "pending" → keep polling
-    }, POLL_INTERVAL);
-  }, [account]);
-
-  const cancelLink = useCallback(() => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = null;
-    setLinkPhase("idle");
-    setLinkError(null);
-  }, []);
 
   // ─── Add Wallet ───────────────────────────────────────────────
   const handleAddWallet = useCallback(async () => {
@@ -215,7 +134,7 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
 
   // ─── Logout ───────────────────────────────────────────────────
   const logout = useCallback(async () => {
-    if (pollRef.current) clearInterval(pollRef.current);
+    autoLink.cancel();
     await updateAccount({
       tier: "free", telegramId: null, telegramUsername: null,
       linkedAt: null, authToken: null,
@@ -274,10 +193,10 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
                 💡 Link Telegram for alerts and synced history
               </div>
               <TelegramLinkButton
-                phase={linkPhase}
-                error={linkError}
-                onStart={startAutoLink}
-                onCancel={cancelLink}
+                phase={autoLink.phase}
+                error={autoLink.error}
+                onStart={autoLink.start}
+                onCancel={autoLink.cancel}
               />
             </div>
           )}
@@ -328,10 +247,10 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
                 Link your Telegram account for alerts, synced history, and higher scan limits.
               </p>
               <TelegramLinkButton
-                phase={linkPhase}
-                error={linkError}
-                onStart={startAutoLink}
-                onCancel={cancelLink}
+                phase={autoLink.phase}
+                error={autoLink.error}
+                onStart={autoLink.start}
+                onCancel={autoLink.cancel}
               />
               <div style={{ marginTop: 8, fontSize: 10, color: COLORS.textMuted }}>
                 Opens @rug_munchy_bot in Telegram. Just tap <b>Start</b> — we'll detect it automatically.

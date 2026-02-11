@@ -18,6 +18,7 @@ import { scanToken, type ScanResult, type ExtScanResponse } from "../services/ap
 import { trackScan } from "../services/analytics";
 import { riskColor, riskLabel, riskEmoji, COLORS } from "../utils/designTokens";
 import { extractMintFromUrl } from "../utils/shadowInject";
+import { useAutoLink } from "../hooks/useAutoLink";
 
 const Popup: React.FC = () => {
   const [view, setView] = useState<"main" | "settings" | "onboarding" | "upgrade">("main");
@@ -31,6 +32,7 @@ const Popup: React.FC = () => {
   const [scanCount, setScanCount] = useState(0);
   const [linked, setLinked] = useState(false);
   const [activeTabMint, setActiveTabMint] = useState<string | null>(null);
+  const autoLink = useAutoLink();
 
   // Check onboarding
   useEffect(() => {
@@ -286,16 +288,29 @@ const Popup: React.FC = () => {
         display: "flex", justifyContent: "space-between", alignItems: "center",
       }}>
         {!linked ? (
-          <button
-            onClick={() => chrome.tabs.create({ url: "https://t.me/rug_munchy_bot?start=link_extension" })}
-            style={{
-              padding: "6px 12px", borderRadius: 6,
-              backgroundColor: `${COLORS.cyan}20`, border: `1px solid ${COLORS.cyan}40`,
-              color: COLORS.cyan, fontSize: 11, cursor: "pointer",
-            }}
-          >
-            🔗 Link Telegram
-          </button>
+          autoLink.phase === "waiting" ? (
+            <span style={{ fontSize: 10, color: COLORS.purple }}>
+              ⏳ Waiting for Telegram...
+              <button onClick={autoLink.cancel} style={{
+                marginLeft: 4, background: "none", border: "none",
+                color: COLORS.textMuted, fontSize: 9, cursor: "pointer",
+                textDecoration: "underline",
+              }}>cancel</button>
+            </span>
+          ) : autoLink.phase === "success" ? (
+            <span style={{ fontSize: 10, color: COLORS.green }}>✅ Telegram linked!</span>
+          ) : (
+            <button
+              onClick={autoLink.start}
+              style={{
+                padding: "6px 12px", borderRadius: 6,
+                backgroundColor: `${COLORS.cyan}20`, border: `1px solid ${COLORS.cyan}40`,
+                color: COLORS.cyan, fontSize: 11, cursor: "pointer",
+              }}
+            >
+              🔗 Link Telegram
+            </button>
+          )
         ) : (
           <span style={{ fontSize: 10, color: COLORS.green }}>✓ Telegram linked</span>
         )}
