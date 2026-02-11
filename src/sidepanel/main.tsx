@@ -165,13 +165,25 @@ const SidePanel: React.FC = () => {
       } else {
         addMessage("marcus", `❓ Couldn't analyze that token. It may not exist yet or the scan service timed out. Try the full scan via Telegram: @rug_munchy_bot`);
       }
-    } else if (lastScanResult) {
-      // Any non-scan message when we have context = question about the last scanned token
-      const d = lastScanResult;
-      addMessage("marcus", analyzeWithContext(text, d));
     } else {
-      // General chat
-      addMessage("marcus", generateResponse(text, detectedMint, lastScanResult));
+      // Real Marcus LLM chat — with scan context if available
+      const marcusResp = await callMarcusChat(
+        text,
+        authToken,
+        lastScanResult,
+        detectedMint,
+        messages.filter(m => m.role !== "system").slice(-10)
+      );
+      if (marcusResp) {
+        addMessage("marcus", marcusResp);
+      } else {
+        // Fallback to local responses if API unavailable
+        if (lastScanResult) {
+          addMessage("marcus", analyzeWithContext(text, lastScanResult));
+        } else {
+          addMessage("marcus", generateResponse(text, detectedMint, lastScanResult));
+        }
+      }
     }
 
     setLoading(false);
@@ -458,6 +470,68 @@ function analyzeWithContext(question: string, d: ScanResult): string {
   if (factors.length > 0) out += `\n⚠️ ${factors.slice(0, 3).join(", ")}\n`;
   out += `\nAsk about **trends**, **holders**, **liquidity**, or **should I buy**. 🗿`;
   return out;
+}
+
+// ─── Marcus LLM Chat ────────────────────────────────────────────
+
+async function callMarcusChat(
+  message: string,
+  authToken: string | null,
+  lastScan: ScanResult | null,
+  detectedMint: string | null,
+  history: ChatMessage[]
+): Promise<string | null> {
+  if (!authToken) return null; // Need auth for Marcus chat
+
+  try {
+    const base = await getApiBase();
+    const context: Record<string, unknown> = {};
+    if (detectedMint) context.mint = detectedMint;
+    if (lastScan) context.scan = lastScan;
+
+    const apiHistory = history.map(m => ({
+      role: m.role === "user" ? "user" : "marcus",
+      content: m.content,
+    }));
+
+    const resp = await fetch(`${base}/ext/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        message,
+        context: Object.keys(context).length > 0 ? context : undefined,
+        history: apiHistory.length > 0 ? apiHistory : undefined,
+      }),
+    });
+
+    if (resp.status === 403) {
+      // Tier too low for chat
+      return "🔒 Marcus chat requires **Holder** tier or above. Upgrade to unlock the full Marcus experience in the side panel.\n\n*\"The impediment to action advances action.\"* — Upgrade, citizen. 🗿";
+    }
+
+    if (resp.status === 429) {
+      return "⏳ Daily Marcus chat limit reached. Even Stoics must rest.\n\n*\"The soul becomes dyed with the color of its thoughts.\"* Come back tomorrow. 🗿";
+    }
+
+    if (!resp.ok) return null; // Fall back to local
+
+    const data = await resp.json();
+    return data.response || null;
+  } catch {
+    return null; // Network error — fall back to local
+  }
+}
+
+async function getApiBase(): Promise<string> {
+  try {
+    const result = await chrome.storage.local.get("api_base");
+    return result.api_base || "https://cryptorugmunch.ngrok.app/api";
+  } catch {
+    return "https://cryptorugmunch.ngrok.app/api";
+  }
 }
 
 function generateResponse(text: string, detectedMint: string | null, lastScan: ScanResult | null): string {
