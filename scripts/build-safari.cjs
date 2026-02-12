@@ -88,6 +88,20 @@ for (const target of targets) {
   );
   fs.writeFileSync(pbxproj, pbx);
 
+  // Patch storyboard dimensions (host app window — larger for better UX)
+  const storyboards = require("child_process").execSync(
+    `find "${projDir}" -name "*.storyboard"`, { encoding: "utf-8" }
+  ).trim().split("\n").filter(Boolean);
+  for (const sb of storyboards) {
+    let content = fs.readFileSync(sb, "utf-8");
+    // Widen host app window
+    content = content.replace(/width="425"/g, 'width="500"');
+    content = content.replace(/height="325"/g, 'height="400"');
+    fs.writeFileSync(sb, content);
+  }
+  console.log(`   Storyboard dimensions patched`);
+
+
   // Build
   console.log(`🏗️  [${target.name}] Building...`);
   try {

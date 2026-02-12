@@ -14,6 +14,17 @@ body {
   color: #FFFFFF;
   font-family: system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
+  /* Extension popup sizing — Safari needs explicit dimensions */
+  width: 440px;
+  min-height: 580px;
+}
+
+/* Safari iOS renders popups as full-width sheets */
+@supports (-webkit-touch-callout: none) {
+  body {
+    width: 100%;
+    min-height: 100vh;
+  }
 }
 
 /* Scrollbar */

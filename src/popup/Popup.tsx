@@ -178,7 +178,7 @@ const Popup: React.FC = () => {
 
   return (
     <div style={{
-      width: "100%", maxWidth: 420, minHeight: "100%", boxSizing: "border-box" as const,
+      width: "100%", maxWidth: 440, minHeight: "100%", boxSizing: "border-box" as const,
       backgroundColor: COLORS.bg,
       color: COLORS.textPrimary,
       fontFamily: "system-ui, -apple-system, sans-serif",
