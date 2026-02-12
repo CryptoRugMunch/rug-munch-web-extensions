@@ -139,14 +139,14 @@ const MarcusChat: React.FC<MarcusChatProps> = ({ onBack, initialScan, initialMin
           if (ca) setDetectedMint(ca);
           initial.push({
             role: "system",
-            text: `📍 Loaded scan: ${initialScan.token_name || initialScan.token_symbol || ca?.slice(0, 8)} (Risk: ${initialScan.risk_score}/100)`,
+            text: `📍 Loaded scan: ${initialScan.token_name || initialScan.token_symbol || ca} (Risk: ${initialScan.risk_score}/100)`,
             ts: Date.now(),
           });
         } else if (initialMint) {
           setDetectedMint(initialMint);
           initial.push({
             role: "system",
-            text: `📍 Detected CA: ${initialMint.slice(0, 8)}...${initialMint.slice(-6)}`,
+            text: `📍 Detected CA: ${initialMint}`,
             ts: Date.now(),
           });
         }
@@ -191,7 +191,7 @@ const MarcusChat: React.FC<MarcusChatProps> = ({ onBack, initialScan, initialMin
       const ca = detectCA(text) || (text.toLowerCase().startsWith("scan") ? detectedMint : null);
 
       if (ca) {
-        addMessage("system", `⏳ Scanning ${ca.slice(0, 8)}...${ca.slice(-6)}`);
+        addMessage("system", `⏳ Scanning ${ca}`);
         const resp = await scanToken(ca);
         const result = resp?.data || null;
         if (result && result.risk_score != null) {
@@ -277,8 +277,8 @@ const MarcusChat: React.FC<MarcusChatProps> = ({ onBack, initialScan, initialMin
         <span style={{ fontSize: 18 }}>🗿</span>
         <div>
           <div style={{ fontWeight: 700, fontSize: 14 }}>Marcus</div>
-          <div style={{ fontSize: 10, color: COLORS.purple }}>
-            {loading ? "Analyzing..." : detectedMint ? `CA: ${detectedMint.slice(0, 6)}...` : "Stoic Crypto Analyst"}
+          <div style={{ fontSize: 10, color: COLORS.purple, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200 }}>
+            {loading ? "Analyzing..." : detectedMint ? `CA: ${detectedMint}` : "Stoic Crypto Analyst"}
           </div>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
@@ -370,7 +370,7 @@ const MarcusChat: React.FC<MarcusChatProps> = ({ onBack, initialScan, initialMin
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") send(); }}
-            placeholder={detectedMint ? `Ask about ${detectedMint.slice(0, 6)}... or paste CA` : "Paste CA or ask Marcus..."}
+            placeholder={detectedMint ? `Ask about ${detectedMint} or paste CA` : "Paste CA or ask Marcus..."}
             disabled={loading}
             style={{
               flex: 1, padding: "8px 10px", borderRadius: 10,
