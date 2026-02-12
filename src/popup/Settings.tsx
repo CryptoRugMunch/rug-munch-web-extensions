@@ -182,7 +182,7 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
 
   return (
     <div style={{
-      width: 380, minHeight: 480, maxHeight: 600, overflowY: "auto",
+      width: "100%", maxWidth: 420, minHeight: "100%", boxSizing: "border-box" as const, maxHeight: 600, overflowY: "auto",
       backgroundColor: COLORS.bg, color: COLORS.textPrimary,
       fontFamily: "system-ui", padding: 16,
     }}>
@@ -264,12 +264,14 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
 
               {phantomAvailable === false && (
                 <div style={{ fontSize: 10, color: COLORS.textMuted, textAlign: "center", marginBottom: 8, padding: "4px 8px", borderRadius: 4, backgroundColor: `${COLORS.gold}10` }}>
-                  ⚠️ Phantom not detected on current tab. Open a crypto site (DexScreener, Pump.fun, etc.) and try again.
+                  {/Safari/.test(navigator.userAgent) && /iPhone|iPad/.test(navigator.userAgent)
+                    ? "📱 On Safari iOS, use the manual address entry below to link your wallet."
+                    : "⚠️ Phantom not detected on current tab. Open a crypto site (DexScreener, Pump.fun, etc.) and try again."}
                 </div>
               )}
 
               {/* Fallback: Manual address entry */}
-              <details style={{ marginTop: 4 }}>
+              <details open={/Safari/.test(navigator.userAgent) && /iPhone|iPad/.test(navigator.userAgent)} style={{ marginTop: 4 }}>
                 <summary style={{ fontSize: 10, color: COLORS.textMuted, cursor: "pointer", userSelect: "none" }}>
                   Don't have Phantom? Enter address manually
                 </summary>

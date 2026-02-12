@@ -307,7 +307,7 @@ const Referral: React.FC<ReferralProps> = ({ onBack }) => {
 
 const Container: React.FC<{ onBack: () => void; children: React.ReactNode }> = ({ onBack, children }) => (
   <div style={{
-    width: 380, minHeight: 480, maxHeight: 600, overflowY: "auto",
+    width: "100%", maxWidth: 420, minHeight: "100%", boxSizing: "border-box" as const, maxHeight: 600, overflowY: "auto",
     backgroundColor: COLORS.bg, color: COLORS.textPrimary, fontFamily: "system-ui", padding: 16,
   }}>
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>

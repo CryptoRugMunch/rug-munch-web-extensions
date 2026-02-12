@@ -229,7 +229,7 @@ const Upgrade: React.FC<UpgradeProps> = ({ onBack, currentTier }) => {
         Current: <strong style={{ color: COLORS.purpleLight }}>{pricing.tiers[currentTier]?.emoji || ""} {currentTier.toUpperCase()}</strong>
       </div>
 
-      <div style={{ maxHeight: 280, overflowY: "auto", marginBottom: 8 }}>
+      <div style={{ overflowY: "auto", marginBottom: 8, flex: "1 1 auto" }}>
         {tierOrder.map((key) => {
           const t = pricing.tiers[key];
           if (!t) return null;
@@ -299,7 +299,7 @@ const Upgrade: React.FC<UpgradeProps> = ({ onBack, currentTier }) => {
 // ─── Sub-components ─────────────────────────────────────────────
 
 const Container: React.FC<{ onBack: () => void; children: React.ReactNode }> = ({ onBack, children }) => (
-  <div style={{ width: 380, minHeight: 480, maxHeight: 600, overflowY: "auto", backgroundColor: COLORS.bg, color: COLORS.textPrimary, fontFamily: "system-ui", padding: 16 }}>
+  <div style={{ width: "100%", maxWidth: 420, minHeight: "100%", overflowY: "auto", boxSizing: "border-box" as const, backgroundColor: COLORS.bg, color: COLORS.textPrimary, fontFamily: "system-ui", padding: 16 }}>
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
       <button onClick={onBack} style={{ background: "none", border: "none", color: COLORS.textSecondary, cursor: "pointer", fontSize: 16, padding: 4 }}>←</button>
       <span style={{ fontWeight: 700, fontSize: 16 }}>🗿 Upgrade</span>

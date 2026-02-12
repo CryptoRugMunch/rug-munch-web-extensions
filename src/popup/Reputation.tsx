@@ -49,7 +49,7 @@ const Reputation: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
   return (
     <div style={{
-      width: 380, minHeight: 480,
+      width: "100%", maxWidth: 420, minHeight: "100%", boxSizing: "border-box" as const,
       backgroundColor: COLORS.bg, color: COLORS.textPrimary,
       fontFamily: "system-ui, -apple-system, sans-serif",
       padding: 16, overflow: "auto",

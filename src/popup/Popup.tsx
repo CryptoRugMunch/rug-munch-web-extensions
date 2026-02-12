@@ -47,13 +47,36 @@ const Popup: React.FC = () => {
     });
   }, []);
 
-  // Load state
+  // Load state + listen for changes (tier sync after linking)
   useEffect(() => {
     chrome.storage.local.get(["tier", "scan_count", "linked_telegram"], (data) => {
       setTier(data.tier || "free");
       setScanCount(data.scan_count || 0);
       setLinked(!!data.linked_telegram);
     });
+
+    // Listen for storage changes (e.g., tier updated after linking)
+    const listener = (changes: { [key: string]: chrome.storage.StorageChange }) => {
+      if (changes.tier) setTier(changes.tier.newValue || "free");
+      if (changes.linked_telegram) setLinked(!!changes.linked_telegram.newValue);
+      if (changes.scan_count) setScanCount(changes.scan_count.newValue || 0);
+    };
+    chrome.storage.onChanged.addListener(listener);
+    return () => chrome.storage.onChanged.removeListener(listener);
+  }, []);
+
+  // Refresh tier periodically (fallback for Safari)
+  useEffect(() => {
+    const refresh = setInterval(() => {
+      chrome.storage.local.get(["tier", "linked_telegram"], (data) => {
+        if (data.tier && data.tier !== tier) setTier(data.tier);
+        if (data.linked_telegram && !linked) setLinked(true);
+      });
+    }, 3000);
+    return () => clearInterval(refresh);
+  }, [tier, linked]);
+
+  useEffect(() => {
 
     // Check for pending scan from context menu
     chrome.storage.local.get("pending_scan", (data) => {
@@ -150,7 +173,7 @@ const Popup: React.FC = () => {
 
   return (
     <div style={{
-      width: 380, minHeight: 480,
+      width: "100%", maxWidth: 420, minHeight: "100%", boxSizing: "border-box" as const,
       backgroundColor: COLORS.bg,
       color: COLORS.textPrimary,
       fontFamily: "system-ui, -apple-system, sans-serif",
@@ -328,7 +351,7 @@ const Popup: React.FC = () => {
 
       {/* Footer */}
       <div style={{
-        position: "absolute", bottom: 16, left: 16, right: 16,
+        marginTop: "auto", paddingTop: 16,
         display: "flex", justifyContent: "space-between", alignItems: "center",
       }}>
         {!linked ? (

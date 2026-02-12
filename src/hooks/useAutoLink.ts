@@ -41,7 +41,16 @@ export function useAutoLink() {
     }
 
     // Open bot deep link
-    chrome.tabs.create({ url: init.bot_url });
+    // Open bot deep link — chrome.tabs.create + window.open fallback for Safari iOS
+    try {
+      if (chrome.tabs?.create) {
+        chrome.tabs.create({ url: init.bot_url });
+      } else {
+        window.open(init.bot_url, "_blank");
+      }
+    } catch {
+      window.open(init.bot_url, "_blank");
+    }
 
     // Poll
     startRef.current = Date.now();
