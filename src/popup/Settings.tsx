@@ -15,6 +15,7 @@ import {
   getSettings, updateSettings, type ExtensionSettings,
   getAccount, updateAccount, type AccountState, DEFAULT_SETTINGS,
 } from "../utils/config";
+import { connectViaDeeplink } from "../services/phantomDeeplink";
 import {
   detectPhantom, authenticateWithPhantom, authenticateWithAddress,
   listWallets, addWallet, removeWallet,
@@ -77,6 +78,10 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
   }, [settings]);
 
   // ─── Wallet Sign-In ───────────────────────────────────────────
+  // Platform detection
+  const isSafariIOS = /Safari/.test(navigator.userAgent) && /iPhone|iPad/.test(navigator.userAgent);
+  const [deeplinkStatus, setDeeplinkStatus] = useState<string | null>(null);
+
   // Phantom detection state
   const [phantomAvailable, setPhantomAvailable] = useState<boolean | null>(null);
 
@@ -110,6 +115,37 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
 
     setWalletLoading(false);
   }, [account]);
+
+  const handlePhantomDeeplink = useCallback(async () => {
+    setWalletLoading(true);
+    setWalletError(null);
+    setDeeplinkStatus("Initializing...");
+
+    const result = await connectViaDeeplink((status) => setDeeplinkStatus(status));
+
+    if (result.success && result.publicKey) {
+      setDeeplinkStatus("Authenticating...");
+      // Use manual auth with the address from Phantom
+      const authResult = await authenticateWithAddress(result.publicKey);
+      if (authResult.success) {
+        setDeeplinkStatus(null);
+        // Refresh wallets
+        const acct = await (await import("../utils/config")).getAccount();
+        if (acct.authToken) {
+          const walletList = await listWallets();
+          setWallets(walletList);
+        }
+      } else {
+        setWalletError(authResult.error || "Authentication failed");
+        setDeeplinkStatus(null);
+      }
+    } else {
+      setWalletError(result.error || "Deeplink connection failed");
+      setDeeplinkStatus(null);
+    }
+
+    setWalletLoading(false);
+  }, []);
 
   const handleManualWalletAuth = useCallback(async () => {
     const addr = walletInput.trim();
@@ -248,26 +284,47 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
           {authTab === "wallet" ? (
             /* Wallet Auth — Phantom signing or manual fallback */
             <div style={{ padding: 12, borderRadius: 8, backgroundColor: COLORS.bgCard, marginBottom: 8 }}>
-              {/* Primary: Phantom sign-in */}
-              <button onClick={handlePhantomAuth} disabled={walletLoading}
-                style={{
-                  width: "100%", padding: "10px 0", borderRadius: 8,
-                  backgroundColor: phantomAvailable !== false ? "#AB9FF2" : COLORS.border,
-                  color: "#fff", border: "none", fontSize: 13, fontWeight: 700,
-                  cursor: walletLoading ? "default" : "pointer",
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                  opacity: walletLoading ? 0.7 : 1,
-                  marginBottom: 8,
-                }}>
-                {walletLoading ? "Connecting..." : "👻 Sign In with Phantom"}
-              </button>
-
-              {phantomAvailable === false && (
-                <div style={{ fontSize: 10, color: COLORS.textMuted, textAlign: "center", marginBottom: 8, padding: "4px 8px", borderRadius: 4, backgroundColor: `${COLORS.gold}10` }}>
-                  {/Safari/.test(navigator.userAgent) && /iPhone|iPad/.test(navigator.userAgent)
-                    ? "📱 On Safari iOS, use the manual address entry below to link your wallet."
-                    : "⚠️ Phantom not detected on current tab. Open a crypto site (DexScreener, Pump.fun, etc.) and try again."}
-                </div>
+              {/* Primary: Phantom sign-in (extension bridge or deeplink) */}
+              {isSafariIOS ? (
+                <>
+                  <button onClick={handlePhantomDeeplink} disabled={walletLoading}
+                    style={{
+                      width: "100%", padding: "10px 0", borderRadius: 8,
+                      backgroundColor: "#AB9FF2",
+                      color: "#fff", border: "none", fontSize: 13, fontWeight: 700,
+                      cursor: walletLoading ? "default" : "pointer",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                      opacity: walletLoading ? 0.7 : 1,
+                      marginBottom: 8,
+                    }}>
+                    {walletLoading ? (deeplinkStatus || "Connecting...") : "👻 Open Phantom App"}
+                  </button>
+                  {deeplinkStatus && (
+                    <div style={{ fontSize: 10, color: COLORS.purple, textAlign: "center", marginBottom: 8 }}>
+                      {deeplinkStatus}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <button onClick={handlePhantomAuth} disabled={walletLoading}
+                    style={{
+                      width: "100%", padding: "10px 0", borderRadius: 8,
+                      backgroundColor: phantomAvailable !== false ? "#AB9FF2" : COLORS.border,
+                      color: "#fff", border: "none", fontSize: 13, fontWeight: 700,
+                      cursor: walletLoading ? "default" : "pointer",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                      opacity: walletLoading ? 0.7 : 1,
+                      marginBottom: 8,
+                    }}>
+                    {walletLoading ? "Connecting..." : "👻 Sign In with Phantom"}
+                  </button>
+                  {phantomAvailable === false && (
+                    <div style={{ fontSize: 10, color: COLORS.textMuted, textAlign: "center", marginBottom: 8, padding: "4px 8px", borderRadius: 4, backgroundColor: `${COLORS.gold}10` }}>
+                      ⚠️ Phantom not detected on current tab. Open a crypto site (DexScreener, Pump.fun, etc.) and try again.
+                    </div>
+                  )}
+                </>
               )}
 
               {/* Fallback: Manual address entry */}
