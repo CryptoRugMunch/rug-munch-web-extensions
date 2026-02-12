@@ -1,11 +1,8 @@
 /**
- * MarcusChat — Full-featured Marcus chat in popup.
- * Feature parity with Chrome side panel:
- * - Auto-detect CA from current page
- * - Inline token scanning with risk display
- * - Marcus LLM chat with scan context + conversation history
- * - Tier-based rate limiting
- * - Local fallback when API unavailable
+ * MarcusChat — Full-featured Marcus chat in popup (Safari + Chrome + Firefox).
+ * 
+ * State persisted in chrome.storage.local so navigating away and back preserves conversation.
+ * Receives last scan result + detected CA from parent Popup component.
  */
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
@@ -18,12 +15,17 @@ interface Message {
   role: "user" | "marcus" | "system";
   text: string;
   ts: number;
-  scanResult?: ScanResult;
 }
 
-interface Props {
+export interface MarcusChatProps {
   onBack: () => void;
+  /** Last scan result from popup main view */
+  initialScan?: ScanResult | null;
+  /** CA detected from active tab */
+  initialMint?: string | null;
 }
+
+const STORAGE_KEY = "marcus_chat_state";
 
 // Tier-based rate limits (per day — mirrors config.py)
 const TIER_CHAT_LIMITS: Record<string, number> = {
@@ -33,9 +35,7 @@ const TIER_CHAT_LIMITS: Record<string, number> = {
   syndicate: 500, og: 500, vip: 500,
 };
 
-// Solana address regex
 const SOL_RE = /[1-9A-HJ-NP-Za-km-z]{32,44}/;
-// EVM address regex
 const EVM_RE = /0x[a-fA-F0-9]{40}/;
 
 function detectCA(text: string): string | null {
@@ -44,75 +44,6 @@ function detectCA(text: string): string | null {
   const solMatch = text.match(SOL_RE);
   if (solMatch && solMatch[0].length >= 32) return solMatch[0];
   return null;
-}
-
-async function getPageCA(): Promise<string | null> {
-  try {
-    const tabs = await chrome.tabs?.query({ active: true, currentWindow: true });
-    if (!tabs?.[0]?.url) return null;
-    const url = tabs[0].url;
-    // Extract from known sites
-    const patterns = [
-      /dexscreener\.com\/solana\/([1-9A-HJ-NP-Za-km-z]{32,44})/,
-      /pump\.fun\/(?:coin\/)?([1-9A-HJ-NP-Za-km-z]{32,44})/,
-      /jup\.ag\/swap\/.*-([1-9A-HJ-NP-Za-km-z]{32,44})/,
-      /birdeye\.so\/token\/([1-9A-HJ-NP-Za-km-z]{32,44})/,
-      /gmgn\.ai\/sol\/token\/([1-9A-HJ-NP-Za-km-z]{32,44})/,
-      /bullx\.io\/terminal\?.*address=([1-9A-HJ-NP-Za-km-z]{32,44})/,
-      /raydium\.io\/swap\/?\?.*(?:inputMint|outputMint)=([1-9A-HJ-NP-Za-km-z]{32,44})/,
-      /photon-sol\.tinyastro\.io\/.*\/([1-9A-HJ-NP-Za-km-z]{32,44})/,
-    ];
-    for (const p of patterns) {
-      const m = url.match(p);
-      if (m) return m[1];
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-async function callMarcusChat(
-  message: string,
-  authToken: string | null,
-  lastScan: ScanResult | null,
-  detectedMint: string | null,
-  history: Message[],
-): Promise<string | null> {
-  if (!authToken) return null;
-  try {
-    const base = await getApiBase();
-    const context: Record<string, unknown> = { source: "popup-marcus" };
-    if (detectedMint) context.mint = detectedMint;
-    if (lastScan) context.scan = lastScan;
-
-    const apiHistory = history
-      .filter(m => m.role !== "system")
-      .slice(-10)
-      .map(m => ({ role: m.role === "user" ? "user" : "marcus", content: m.text }));
-
-    const resp = await fetch(`${base}/ext/chat`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${authToken}`,
-      },
-      body: JSON.stringify({
-        message,
-        context: Object.keys(context).length > 0 ? context : undefined,
-        history: apiHistory.length > 0 ? apiHistory : undefined,
-      }),
-    });
-
-    if (resp.status === 403) return "🔒 Marcus chat requires a linked account. Link your Telegram via Settings to unlock. 🗿";
-    if (resp.status === 429) return "⏳ Daily chat limit reached. *\"Even Stoics must rest.\"* Come back tomorrow. 🗿";
-    if (!resp.ok) return null;
-
-    const data = await resp.json();
-    return data.response || null;
-  } catch {
-    return null;
-  }
 }
 
 function riskBar(score: number | null | undefined): string {
@@ -137,31 +68,30 @@ function formatScanResult(d: ScanResult): string {
   if (d.liquidity_usd) lines.push(`💧 Liquidity: $${Number(d.liquidity_usd).toLocaleString()}`);
 
   const flags: string[] = [];
-  if ((d as any).freeze_authority_enabled === false) flags.push("✅ Freeze Revoked");
-  if ((d as any).freeze_authority_enabled === true) flags.push("⚠️ Freeze Active");
-  if ((d as any).mint_authority_enabled === false) flags.push("✅ Mint Revoked");
-  if ((d as any).mint_authority_enabled === true) flags.push("⚠️ Mint Active");
+  const da = d as any;
+  if (da.freeze_authority_enabled === false) flags.push("✅ Freeze Revoked");
+  if (da.freeze_authority_enabled === true) flags.push("⚠️ Freeze Active");
+  if (da.mint_authority_enabled === false) flags.push("✅ Mint Revoked");
+  if (da.mint_authority_enabled === true) flags.push("⚠️ Mint Active");
   if (flags.length) { lines.push(""); lines.push(flags.join(" | ")); }
 
-  const verdicts: Record<string, string> = {
-    critical: "\n🔴 CRITICAL RISK — *\"If it is not right, do not do it.\"* Stay away.",
-    high: "\n⚠️ HIGH RISK — Proceed with extreme caution.",
-    moderate: "\n🟡 Moderate risk. DYOR.",
-    low: "\n🟢 Low risk indicators, but stay vigilant.",
-  };
   const score = d.risk_score;
   if (score != null) {
     const key = score >= 75 ? "critical" : score >= 50 ? "high" : score >= 25 ? "moderate" : "low";
+    const verdicts: Record<string, string> = {
+      critical: "\n🔴 CRITICAL RISK — *\"If it is not right, do not do it.\"* Stay away.",
+      high: "\n⚠️ HIGH RISK — Proceed with extreme caution.",
+      moderate: "\n🟡 Moderate risk. DYOR.",
+      low: "\n🟢 Low risk indicators, but stay vigilant.",
+    };
     lines.push(verdicts[key]);
   }
 
   return lines.join("\n");
 }
 
-const MarcusChat: React.FC<Props> = ({ onBack }) => {
-  const [messages, setMessages] = useState<Message[]>([
-    { role: "marcus", text: "Ave, citizen. Paste a CA or ask about token safety. 🗿", ts: Date.now() },
-  ]);
+const MarcusChat: React.FC<MarcusChatProps> = ({ onBack, initialScan, initialMint }) => {
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [tier, setTier] = useState("free");
@@ -169,36 +99,82 @@ const MarcusChat: React.FC<Props> = ({ onBack }) => {
   const [detectedMint, setDetectedMint] = useState<string | null>(null);
   const [lastScan, setLastScan] = useState<ScanResult | null>(null);
   const [msgCount, setMsgCount] = useState(0);
+  const [loaded, setLoaded] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const msgLimit = TIER_CHAT_LIMITS[tier] || 1;
 
-  // Load state + detect page CA
+  // Load persisted state on mount
   useEffect(() => {
     chrome.storage?.local?.get(
-      ["tier", "linked_telegram", "auth_token"],
+      [STORAGE_KEY, "tier", "auth_token"],
       (data) => {
         setTier(data.tier || "free");
         setAuthToken(data.auth_token || null);
+
+        const saved = data[STORAGE_KEY];
+        if (saved) {
+          // Only restore if saved within last 30 minutes
+          const age = Date.now() - (saved.savedAt || 0);
+          if (age < 30 * 60 * 1000) {
+            setMessages(saved.messages || []);
+            setMsgCount(saved.msgCount || 0);
+            if (saved.detectedMint) setDetectedMint(saved.detectedMint);
+            if (saved.lastScan) setLastScan(saved.lastScan);
+            setLoaded(true);
+            return;
+          }
+        }
+
+        // No saved state or expired — start fresh
+        const initial: Message[] = [
+          { role: "marcus", text: "Ave, citizen. Paste a CA or ask about token safety. 🗿", ts: Date.now() },
+        ];
+
+        // If parent passed a scan result, show it
+        if (initialScan && initialScan.risk_score != null) {
+          setLastScan(initialScan);
+          const ca = initialScan.token_address || initialMint;
+          if (ca) setDetectedMint(ca);
+          initial.push({
+            role: "system",
+            text: `📍 Loaded scan: ${initialScan.token_name || initialScan.token_symbol || ca?.slice(0, 8)} (Risk: ${initialScan.risk_score}/100)`,
+            ts: Date.now(),
+          });
+        } else if (initialMint) {
+          setDetectedMint(initialMint);
+          initial.push({
+            role: "system",
+            text: `📍 Detected CA: ${initialMint.slice(0, 8)}...${initialMint.slice(-6)}`,
+            ts: Date.now(),
+          });
+        }
+
+        setMessages(initial);
+        setLoaded(true);
       }
     );
-    getPageCA().then((ca) => {
-      if (ca) {
-        setDetectedMint(ca);
-        setMessages(prev => [...prev, {
-          role: "system",
-          text: `📍 Detected CA from page: ${ca.slice(0, 8)}...${ca.slice(-6)}`,
-          ts: Date.now(),
-        }]);
-      }
+  }, [initialScan, initialMint]);
+
+  // Persist state on every change
+  useEffect(() => {
+    if (!loaded) return;
+    chrome.storage?.local?.set({
+      [STORAGE_KEY]: {
+        messages,
+        msgCount,
+        detectedMint,
+        lastScan,
+        savedAt: Date.now(),
+      },
     });
-  }, []);
+  }, [messages, msgCount, detectedMint, lastScan, loaded]);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
-  const addMessage = useCallback((role: "user" | "marcus" | "system", text: string, scan?: ScanResult) => {
-    setMessages(prev => [...prev, { role, text, ts: Date.now(), scanResult: scan }]);
+  const addMessage = useCallback((role: "user" | "marcus" | "system", text: string) => {
+    setMessages(prev => [...prev, { role, text, ts: Date.now() }]);
   }, []);
 
   const send = useCallback(async () => {
@@ -221,31 +197,66 @@ const MarcusChat: React.FC<Props> = ({ onBack }) => {
         if (result && result.risk_score != null) {
           setLastScan(result);
           setDetectedMint(ca);
-          addMessage("marcus", formatScanResult(result), result);
+          addMessage("marcus", formatScanResult(result));
         } else {
-          addMessage("marcus", `❓ Couldn't analyze that token. Try via Telegram: @rug_munchy_bot`);
+          addMessage("marcus", `❓ Couldn't analyze that token. Try via @rug_munchy_bot on Telegram.`);
         }
       } else {
-        // LLM chat with context
-        const marcusResp = await callMarcusChat(text, authToken, lastScan, detectedMint, messages);
-        if (marcusResp) {
-          addMessage("marcus", marcusResp);
+        // LLM chat
+        if (!authToken) {
+          addMessage("marcus", lastScan
+            ? `Based on the last scan, risk is ${lastScan.risk_score}/100. Link your account in Settings for full Marcus chat. 🗿`
+            : "Paste a contract address and I'll analyze it. Link your account in Settings for full Marcus chat. 🗿"
+          );
         } else {
-          // Fallback
-          if (lastScan) {
-            addMessage("marcus", `Based on the last scan, this token has a risk score of ${lastScan.risk_score}/100. Ask me something specific about it, or paste a new CA. 🗿`);
-          } else {
-            addMessage("marcus", "Paste a contract address and I'll analyze it. Or link your account in Settings for full Marcus chat. 🗿");
+          try {
+            const base = await getApiBase();
+            const context: Record<string, unknown> = { source: "popup-marcus" };
+            if (detectedMint) context.mint = detectedMint;
+            if (lastScan) context.scan = lastScan;
+
+            const apiHistory = messages
+              .filter(m => m.role !== "system")
+              .slice(-10)
+              .map(m => ({ role: m.role === "user" ? "user" : "marcus", content: m.text }));
+
+            const resp = await fetch(`${base}/ext/chat`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${authToken}`,
+              },
+              body: JSON.stringify({
+                message: text,
+                context: Object.keys(context).length > 0 ? context : undefined,
+                history: apiHistory.length > 0 ? apiHistory : undefined,
+              }),
+            });
+
+            if (resp.status === 403) {
+              addMessage("marcus", "🔒 Chat requires a linked account. Link Telegram via Settings. 🗿");
+            } else if (resp.status === 429) {
+              addMessage("marcus", "⏳ Daily limit reached. Come back tomorrow. 🗿");
+            } else if (resp.ok) {
+              const data = await resp.json();
+              addMessage("marcus", data.response || "No response from Marcus.");
+            } else {
+              addMessage("marcus", "*stares stoically* Something went wrong. Try again, citizen.");
+            }
+          } catch {
+            addMessage("marcus", "*stares stoically* Connection failed. Check your network and try again.");
           }
         }
       }
     } catch (e: any) {
-      addMessage("marcus", `⚠️ ${e.message || "Something went wrong"}\n\nTry again or use @rug_munchy_bot on Telegram.`);
+      addMessage("marcus", `⚠️ ${e.message || "Something went wrong"}`);
     } finally {
       setLoading(false);
       inputRef.current?.focus();
     }
   }, [input, loading, authToken, lastScan, detectedMint, messages, addMessage]);
+
+  if (!loaded) return null; // Don't flash empty state while loading
 
   return (
     <div style={{
@@ -267,7 +278,7 @@ const MarcusChat: React.FC<Props> = ({ onBack }) => {
         <div>
           <div style={{ fontWeight: 700, fontSize: 14 }}>Marcus</div>
           <div style={{ fontSize: 10, color: COLORS.purple }}>
-            {loading ? "Analyzing..." : detectedMint ? `CA detected` : "Stoic Crypto Analyst"}
+            {loading ? "Analyzing..." : detectedMint ? `CA: ${detectedMint.slice(0, 6)}...` : "Stoic Crypto Analyst"}
           </div>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
@@ -307,7 +318,7 @@ const MarcusChat: React.FC<Props> = ({ onBack }) => {
               fontSize: m.role === "system" ? 11 : 13, lineHeight: 1.5,
               whiteSpace: "pre-wrap", wordBreak: "break-word",
               ...(m.role === "system"
-                ? { color: COLORS.textMuted, fontStyle: "italic", textAlign: "center" as const, width: "100%" }
+                ? { color: COLORS.textMuted, fontStyle: "italic" as const, textAlign: "center" as const, width: "100%" }
                 : m.role === "marcus"
                   ? { backgroundColor: COLORS.bgCard, color: "#c4b5fd", border: `1px solid ${COLORS.border}`, borderTopLeftRadius: 4 }
                   : { backgroundColor: `${COLORS.purple}20`, color: "#fff", border: `1px solid ${COLORS.purple}30`, borderTopRightRadius: 4 }

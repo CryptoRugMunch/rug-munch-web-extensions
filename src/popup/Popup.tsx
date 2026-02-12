@@ -169,7 +169,7 @@ const Popup: React.FC = () => {
   }
 
   if (view === "marcus") {
-    return <MarcusChat onBack={() => setView("main")} />;
+    return <MarcusChat onBack={() => setView("main")} initialScan={result} initialMint={activeTabMint} />;
   }
 
   if (view === "upgrade") {
