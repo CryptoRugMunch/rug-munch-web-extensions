@@ -1,6 +1,6 @@
 {
   "name": "rug-munch-extension",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,7 +12,11 @@
     "typecheck": "tsc --noEmit",
     "build:chrome": "tsc -b && vite build",
     "build:all": "npm run build && npm run build:firefox && npm run build:safari",
-    "build:safari": "node scripts/build-safari.cjs"
+    "build:safari": "node scripts/build-safari.cjs",
+    "archive:safari": "node scripts/archive-safari.cjs",
+    "archive:macos": "node scripts/archive-safari.cjs --macos-only",
+    "archive:ios": "node scripts/archive-safari.cjs --ios-only",
+    "archive:upload": "node scripts/archive-safari.cjs --upload"
   },
   "dependencies": {
     "lucide-react": "^0.562.0",

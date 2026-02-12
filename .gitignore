@@ -11,3 +11,7 @@ firebase-debug.log
 dist-safari/
 safari-xcode/
 safari-xcode-ios/
+
+# Archives & exports (App Store builds)
+archives/*.xcarchive
+exports/
