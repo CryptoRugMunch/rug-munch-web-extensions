@@ -17,6 +17,7 @@ import Referral from "./Referral";
 import Reputation from "./Reputation";
 import Social from "./Social";
 import Onboarding from "./Onboarding";
+import MarcusChat from "./MarcusChat";
 import { scanToken, type ScanResult, type ExtScanResponse } from "../services/api";
 import { trackScan } from "../services/analytics";
 import { riskColor, riskLabel, riskEmoji, COLORS } from "../utils/designTokens";
@@ -24,7 +25,7 @@ import { extractMintFromUrl } from "../utils/shadowInject";
 import { useAutoLink } from "../hooks/useAutoLink";
 
 const Popup: React.FC = () => {
-  const [view, setView] = useState<"main" | "settings" | "onboarding" | "upgrade" | "referral" | "reputation" | "social">("main");
+  const [view, setView] = useState<"main" | "settings" | "onboarding" | "upgrade" | "referral" | "reputation" | "social" | "marcus">("main");
   const [, setHasOnboarded] = useState(true);
   const [input, setInput] = useState("");
   const [scanning, setScanning] = useState(false);
@@ -167,6 +168,10 @@ const Popup: React.FC = () => {
     return <Social onBack={() => setView("main")} />;
   }
 
+  if (view === "marcus") {
+    return <MarcusChat onBack={() => setView("main")} />;
+  }
+
   if (view === "upgrade") {
     return <Upgrade onBack={() => setView("main")} currentTier={tier} />;
   }
@@ -204,6 +209,14 @@ const Popup: React.FC = () => {
               ↑
             </button>
           )}
+          <button
+            onClick={() => setView("marcus")}
+            style={{
+              background: "none", border: "none", color: COLORS.textSecondary,
+              cursor: "pointer", fontSize: 14, padding: 2,
+            }}
+            title="Marcus AI"
+          >🗿</button>
           <button
             onClick={() => setView("social")}
             style={{
