@@ -2,14 +2,11 @@
 /**
  * Safari extension build script.
  *
- * Takes the Chrome dist and generates Xcode projects for:
- * - macOS Safari (safari-xcode/)
- * - iOS Safari (safari-xcode-ios/)
+ * Generates Xcode projects for macOS + iOS Safari, fixes bundle IDs,
+ * and builds both via xcodebuild CLI.
  *
- * Prerequisites:
- * - Xcode installed with command-line tools
- * - macOS only
- * - Run `npm run build` first to generate dist/
+ * Prerequisites: Xcode with CLI tools, macOS only.
+ * Run `npm run build` first to generate dist/.
  */
 
 const fs = require("fs");
@@ -19,7 +16,9 @@ const { execSync } = require("child_process");
 const distChrome = path.join(__dirname, "..", "dist");
 const distSafari = path.join(__dirname, "..", "dist-safari");
 
-// Verify dist exists
+const TEAM_ID = "DGKZ9VVY9B";
+const APP_BUNDLE_ID = "com.cryptorugmunch.Rug-Munch-Intelligence";
+
 if (!fs.existsSync(distChrome)) {
   console.error("❌ dist/ not found. Run `npm run build` first.");
   process.exit(1);
@@ -33,63 +32,97 @@ fs.cpSync(distChrome, distSafari, { recursive: true });
 const manifest = JSON.parse(
   fs.readFileSync(path.join(distSafari, "manifest.json"), "utf-8")
 );
-
-// Remove unsupported features
 delete manifest.side_panel;
 delete manifest.minimum_chrome_version;
-manifest.permissions = manifest.permissions.filter(
-  (p) => !["sidePanel"].includes(p)
-);
-
+manifest.permissions = manifest.permissions.filter((p) => p !== "sidePanel");
 fs.writeFileSync(
   path.join(distSafari, "manifest.json"),
   JSON.stringify(manifest, null, 2)
 );
 console.log("✅ Safari manifest ready\n");
 
-// Step 2: Generate Xcode projects
+// Step 2: Generate and build for each platform
 const targets = [
-  {
-    name: "macOS",
-    flag: "--macos-only",
-    outDir: path.join(__dirname, "..", "safari-xcode"),
-    bundleId: "com.cryptorugmunch.safari-extension",
-  },
-  {
-    name: "iOS",
-    flag: "--ios-only",
-    outDir: path.join(__dirname, "..", "safari-xcode-ios"),
-    bundleId: "com.cryptorugmunch.safari-extension-ios",
-  },
+  { name: "macOS", flag: "--macos-only", dir: "safari-xcode", dest: "platform=macOS" },
+  { name: "iOS",   flag: "--ios-only",   dir: "safari-xcode-ios", dest: "generic/platform=iOS" },
 ];
 
+let allPassed = true;
+
 for (const target of targets) {
-  console.log(`🔨 Generating ${target.name} Xcode project...`);
-  if (fs.existsSync(target.outDir)) fs.rmSync(target.outDir, { recursive: true });
+  const outDir = path.join(__dirname, "..", target.dir);
+
+  // Generate Xcode project
+  console.log(`🔨 [${target.name}] Generating Xcode project...`);
+  if (fs.existsSync(outDir)) fs.rmSync(outDir, { recursive: true });
 
   try {
     execSync(
       [
         "xcrun safari-web-extension-converter",
         `"${distSafari}"`,
-        "--project-location", `"${target.outDir}"`,
-        "--app-name", '"Rug Munch Intelligence"',
-        "--bundle-identifier", target.bundleId,
-        "--swift",
-        target.flag,
-        "--no-open",
-        "--no-prompt",
+        "--project-location", `"${outDir}"`,
+        '--app-name', '"Rug Munch Intelligence"',
+        "--bundle-identifier", APP_BUNDLE_ID,
+        "--swift", target.flag, "--no-open", "--no-prompt",
       ].join(" "),
-      { stdio: "inherit" }
+      { stdio: "pipe" }
     );
-    console.log(`✅ ${target.name} project → ${path.basename(target.outDir)}/\n`);
   } catch (e) {
-    console.error(`❌ ${target.name} conversion failed\n`);
+    // Converter prints warnings to stderr but still succeeds
+    if (!fs.existsSync(path.join(outDir, "Rug Munch Intelligence"))) {
+      console.error(`❌ [${target.name}] Converter failed`);
+      allPassed = false;
+      continue;
+    }
+  }
+
+  // Fix bundle IDs — extension must be child of app
+  const projDir = path.join(outDir, "Rug Munch Intelligence");
+  const pbxproj = path.join(projDir, "Rug Munch Intelligence.xcodeproj", "project.pbxproj");
+  let pbx = fs.readFileSync(pbxproj, "utf-8");
+  // Replace any extension bundle ID that doesn't match the expected pattern
+  pbx = pbx.replace(
+    /PRODUCT_BUNDLE_IDENTIFIER = ".*?\.Extension"/g,
+    `PRODUCT_BUNDLE_IDENTIFIER = "${APP_BUNDLE_ID}.Extension"`
+  );
+  fs.writeFileSync(pbxproj, pbx);
+
+  // Build
+  console.log(`🏗️  [${target.name}] Building...`);
+  try {
+    execSync(
+      [
+        "xcodebuild",
+        `-scheme "Rug Munch Intelligence"`,
+        "-configuration Release",
+        `-destination "${target.dest}"`,
+        `DEVELOPMENT_TEAM=${TEAM_ID}`,
+        `CODE_SIGN_IDENTITY="Apple Development"`,
+        "CODE_SIGN_STYLE=Automatic",
+        "build",
+      ].join(" "),
+      { cwd: projDir, stdio: "pipe", timeout: 120000 }
+    );
+    console.log(`✅ [${target.name}] BUILD SUCCEEDED\n`);
+  } catch (e) {
+    const output = (e.stdout || "").toString();
+    if (output.includes("BUILD SUCCEEDED")) {
+      console.log(`✅ [${target.name}] BUILD SUCCEEDED\n`);
+    } else {
+      console.error(`❌ [${target.name}] BUILD FAILED`);
+      console.error(output.split("\n").slice(-10).join("\n"));
+      allPassed = false;
+    }
   }
 }
 
-console.log("🎯 Next steps:");
-console.log("   macOS: open safari-xcode/Rug\\ Munch\\ Intelligence/Rug\\ Munch\\ Intelligence.xcodeproj");
-console.log("   iOS:   open safari-xcode-ios/Rug\\ Munch\\ Intelligence/Rug\\ Munch\\ Intelligence.xcodeproj");
-console.log("   → Select signing team → Build & Run (⌘R)");
-console.log("   → Safari > Settings > Extensions → Enable");
+if (allPassed) {
+  console.log("🎯 All Safari builds succeeded!");
+  console.log("   macOS app: ~/Library/Developer/Xcode/DerivedData/Rug_Munch_Intelligence-*/Build/Products/Release/");
+  console.log("   iOS app:   ~/Library/Developer/Xcode/DerivedData/Rug_Munch_Intelligence-*/Build/Products/Release-iphoneos/");
+  console.log("\n   To enable: Safari > Settings > Extensions > ✅ Rug Munch Intelligence");
+} else {
+  console.error("\n⚠️  Some builds failed. Check output above.");
+  process.exit(1);
+}
