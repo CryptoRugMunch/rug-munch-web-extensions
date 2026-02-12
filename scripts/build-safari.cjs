@@ -119,9 +119,30 @@ for (const target of targets) {
 
 if (allPassed) {
   console.log("🎯 All Safari builds succeeded!");
-  console.log("   macOS app: ~/Library/Developer/Xcode/DerivedData/Rug_Munch_Intelligence-*/Build/Products/Release/");
+
+  // Auto-install macOS app to /Applications with re-signing
+  try {
+    const macApp = require("child_process").execSync(
+      'find ~/Library/Developer/Xcode/DerivedData/Rug_Munch_Intelligence-* -name "Rug Munch Intelligence.app" -path "*/Release/*" -not -path "*iphoneos*" 2>/dev/null | head -1',
+      { encoding: "utf-8" }
+    ).trim();
+    if (macApp) {
+      console.log("\n📦 Installing macOS app to /Applications...");
+      require("child_process").execSync(`cp -R "${macApp}" /Applications/`, { stdio: "inherit" });
+      require("child_process").execSync(
+        'codesign --force --deep --sign "Apple Development: Amaro de Abreu (36THR9BCCJ)" "/Applications/Rug Munch Intelligence.app"',
+        { stdio: "inherit" }
+      );
+      console.log("✅ macOS app installed and re-signed");
+    }
+  } catch (e) {
+    console.log("⚠️  macOS auto-install failed:", e.message);
+  }
+
+  console.log("   macOS app: /Applications/Rug Munch Intelligence.app");
   console.log("   iOS app:   ~/Library/Developer/Xcode/DerivedData/Rug_Munch_Intelligence-*/Build/Products/Release-iphoneos/");
   console.log("\n   To enable: Safari > Settings > Extensions > ✅ Rug Munch Intelligence");
+
 } else {
   console.error("\n⚠️  Some builds failed. Check output above.");
   process.exit(1);
