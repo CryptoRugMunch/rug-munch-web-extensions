@@ -11,7 +11,8 @@
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "build:chrome": "tsc -b && vite build",
-    "build:all": "npm run build:chrome && npm run build:firefox"
+    "build:all": "npm run build && npm run build:firefox && npm run build:safari",
+    "build:safari": "node scripts/build-safari.cjs"
   },
   "dependencies": {
     "lucide-react": "^0.562.0",
