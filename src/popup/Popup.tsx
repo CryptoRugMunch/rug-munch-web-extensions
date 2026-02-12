@@ -14,6 +14,8 @@ import React, { useState, useEffect, useCallback } from "react";
 import Settings from "./Settings";
 import Upgrade from "./Upgrade";
 import Referral from "./Referral";
+import Reputation from "./Reputation";
+import Social from "./Social";
 import Onboarding from "./Onboarding";
 import { scanToken, type ScanResult, type ExtScanResponse } from "../services/api";
 import { trackScan } from "../services/analytics";
@@ -22,7 +24,7 @@ import { extractMintFromUrl } from "../utils/shadowInject";
 import { useAutoLink } from "../hooks/useAutoLink";
 
 const Popup: React.FC = () => {
-  const [view, setView] = useState<"main" | "settings" | "onboarding" | "upgrade" | "referral">("main");
+  const [view, setView] = useState<"main" | "settings" | "onboarding" | "upgrade" | "referral" | "reputation" | "social">("main");
   const [, setHasOnboarded] = useState(true);
   const [input, setInput] = useState("");
   const [scanning, setScanning] = useState(false);
@@ -134,6 +136,14 @@ const Popup: React.FC = () => {
     return <Referral onBack={() => setView("main")} />;
   }
 
+  if (view === "reputation") {
+    return <Reputation onBack={() => setView("main")} />;
+  }
+
+  if (view === "social") {
+    return <Social onBack={() => setView("main")} />;
+  }
+
   if (view === "upgrade") {
     return <Upgrade onBack={() => setView("main")} currentTier={tier} />;
   }
@@ -171,6 +181,22 @@ const Popup: React.FC = () => {
               ↑
             </button>
           )}
+          <button
+            onClick={() => setView("social")}
+            style={{
+              background: "none", border: "none", color: COLORS.textSecondary,
+              cursor: "pointer", fontSize: 14, padding: 2,
+            }}
+            title="Social"
+          >👥</button>
+          <button
+            onClick={() => setView("reputation")}
+            style={{
+              background: "none", border: "none", color: COLORS.textSecondary,
+              cursor: "pointer", fontSize: 14, padding: 2,
+            }}
+            title="Reputation"
+          >🏛️</button>
           <button
             onClick={() => setView("referral")}
             style={{

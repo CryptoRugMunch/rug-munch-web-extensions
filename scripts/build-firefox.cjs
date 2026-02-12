@@ -5,8 +5,9 @@
  * Takes the Chrome manifest and:
  * 1. Adds browser_specific_settings.gecko
  * 2. Replaces sidePanel with sidebar_action
- * 3. Removes Chrome-only permissions
- * 4. Outputs to dist-firefox/
+ * 3. Converts service_worker to background.scripts (Firefox compat)
+ * 4. Removes Chrome-only permissions
+ * 5. Outputs to dist-firefox/
  */
 
 const fs = require("fs");
@@ -31,10 +32,18 @@ manifest.browser_specific_settings = {
   },
 };
 
+// Convert service_worker to scripts (Firefox doesn't support service_worker)
+if (manifest.background && manifest.background.service_worker) {
+  manifest.background = {
+    scripts: [manifest.background.service_worker],
+    type: "module",
+  };
+}
+
 // Replace sidePanel with sidebar_action (Firefox equivalent)
 if (manifest.side_panel) {
   manifest.sidebar_action = {
-    default_title: "Marcus — Rug Munch",
+    default_title: "Marcus — Rug Munch Intelligence",
     default_panel: manifest.side_panel.default_path,
     default_icon: {
       16: "icons/icon-16.png",
@@ -61,3 +70,4 @@ fs.writeFileSync(
 console.log("✅ Firefox build ready at dist-firefox/");
 console.log("   Gecko ID: scanner@cryptorugmunch.com");
 console.log("   Min Firefox: 109.0");
+console.log("   Background: scripts[] (Firefox-compatible)");
