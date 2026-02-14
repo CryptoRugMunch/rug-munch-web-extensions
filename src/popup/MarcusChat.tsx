@@ -10,6 +10,7 @@ import { COLORS } from "../utils/designTokens";
 import { getApiBase } from "../utils/config";
 import { scanToken, type ScanResult } from "../services/api";
 import { riskLabel, riskEmoji } from "../utils/designTokens";
+import { extractMintFromUrl } from "../utils/shadowInject";
 
 interface Message {
   role: "user" | "marcus" | "system";
@@ -90,6 +91,53 @@ function formatScanResult(d: ScanResult): string {
   return lines.join("\n");
 }
 
+/** Simple markdown-ish formatting for chat messages */
+function formatText(text: string): React.ReactNode {
+  // Split on newlines, then process inline formatting
+  const lines = text.split("\n");
+  return lines.map((line, i) => {
+    // Process bold **text** and *text*
+    const parts: React.ReactNode[] = [];
+    let remaining = line;
+    let key = 0;
+    
+    // Bold: **text**
+    while (remaining.includes("**")) {
+      const start = remaining.indexOf("**");
+      const end = remaining.indexOf("**", start + 2);
+      if (end === -1) break;
+      if (start > 0) parts.push(remaining.slice(0, start));
+      parts.push(<strong key={`b${key++}`}>{remaining.slice(start + 2, end)}</strong>);
+      remaining = remaining.slice(end + 2);
+    }
+    
+    // Code: `text`
+    if (remaining.includes("`")) {
+      const result: React.ReactNode[] = [];
+      const segments = remaining.split("`");
+      segments.forEach((seg, j) => {
+        if (j % 2 === 1) {
+          result.push(<code key={`c${key++}`} style={{ backgroundColor: "rgba(126,76,255,0.2)", padding: "1px 4px", borderRadius: 3, fontSize: "0.9em" }}>{seg}</code>);
+        } else {
+          result.push(seg);
+        }
+      });
+      if (parts.length > 0) parts.push(...result);
+      else parts.push(...result);
+      remaining = "";
+    }
+    
+    if (remaining) parts.push(remaining);
+    
+    return (
+      <React.Fragment key={i}>
+        {parts.length > 0 ? parts : line}
+        {i < lines.length - 1 && <br />}
+      </React.Fragment>
+    );
+  });
+}
+
 const MarcusChat: React.FC<MarcusChatProps> = ({ onBack, initialScan, initialMint }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -155,7 +203,28 @@ const MarcusChat: React.FC<MarcusChatProps> = ({ onBack, initialScan, initialMin
         setLoaded(true);
       }
     );
+
+    // Auto-detect CA from active tab URL
+    if (!initialMint) {
+      try {
+        chrome.tabs?.query({ active: true, currentWindow: true }, (tabs) => {
+          if (tabs?.[0]?.url) {
+            const mint = extractMintFromUrl(tabs[0].url);
+            if (mint) {
+              setDetectedMint(mint);
+              setMessages(prev => [...prev, {
+                role: "system" as const,
+                text: `📍 Detected CA from tab: ${mint}`,
+                ts: Date.now(),
+              }]);
+            }
+          }
+        });
+      } catch { /* Extension API may not be available in all contexts */ }
+    }
   }, [initialScan, initialMint]);
+
+
 
   // Persist state on every change
   useEffect(() => {
@@ -176,6 +245,21 @@ const MarcusChat: React.FC<MarcusChatProps> = ({ onBack, initialScan, initialMin
   const addMessage = useCallback((role: "user" | "marcus" | "system", text: string) => {
     setMessages(prev => [...prev, { role, text, ts: Date.now() }]);
   }, []);
+
+  // Listen for tab URL changes (detect new CAs when user navigates)
+  useEffect(() => {
+    const handler = (_tabId: number, info: chrome.tabs.TabChangeInfo) => {
+      if (info.url) {
+        const mint = extractMintFromUrl(info.url);
+        if (mint && mint !== detectedMint) {
+          setDetectedMint(mint);
+          addMessage("system", `📍 New CA detected: ${mint}`);
+        }
+      }
+    };
+    try { chrome.tabs?.onUpdated?.addListener(handler); } catch {}
+    return () => { try { chrome.tabs?.onUpdated?.removeListener(handler); } catch {} };
+  }, [detectedMint, addMessage]);
 
   const send = useCallback(async () => {
     const text = input.trim();
@@ -324,7 +408,7 @@ const MarcusChat: React.FC<MarcusChatProps> = ({ onBack, initialScan, initialMin
                   : { backgroundColor: `${COLORS.purple}20`, color: "#fff", border: `1px solid ${COLORS.purple}30`, borderTopRightRadius: 4 }
               ),
             }}>
-              {m.text}
+              {formatText(m.text)}
               {m.role !== "system" && (
                 <div style={{ fontSize: 9, marginTop: 4, opacity: 0.4 }}>
                   {new Date(m.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}

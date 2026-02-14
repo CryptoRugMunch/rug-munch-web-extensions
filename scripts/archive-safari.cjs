@@ -156,6 +156,19 @@ for (const target of targets) {
   pbx = pbx.replace(/CURRENT_PROJECT_VERSION = .*?;/g, `CURRENT_PROJECT_VERSION = ${BUILD_NUMBER};`);
   fs.writeFileSync(pbxPath, pbx);
 
+  // Patch Info.plist: add LSApplicationCategoryType for App Store (macOS requires it)
+  const infoPlistPath = path.join(projDir, APP_NAME, "Info.plist");
+  if (fs.existsSync(infoPlistPath)) {
+    let plist = fs.readFileSync(infoPlistPath, "utf-8");
+    if (!plist.includes("LSApplicationCategoryType")) {
+      plist = plist.replace(
+        "</dict>",
+        `\t<key>LSApplicationCategoryType</key>\n\t<string>public.app-category.finance</string>\n</dict>`
+      );
+      fs.writeFileSync(infoPlistPath, plist);
+    }
+  }
+
   // Step 1: Archive
   console.log(`📦 [${target.name}] Archiving v${VERSION} (${BUILD_NUMBER})...`);
   if (fs.existsSync(target.archivePath)) fs.rmSync(target.archivePath, { recursive: true });
@@ -210,6 +223,7 @@ for (const target of targets) {
       `-archivePath "${target.archivePath}"`,
       `-exportPath "${target.exportPath}"`,
       `-exportOptionsPlist "${target.exportPlist}"`,
+      "-allowProvisioningUpdates",
     ].join(" ");
 
     execSync(exportCmd, { stdio: "pipe", timeout: 120000 });

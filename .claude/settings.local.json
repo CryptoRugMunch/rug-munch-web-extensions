@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(security find-identity:*)",
+      "Bash(done)",
+      "Bash(/usr/bin/security cms:*)",
+      "Bash(/usr/bin/plutil:*)",
+      "Bash(python3:*)"
+    ]
+  }
+}
