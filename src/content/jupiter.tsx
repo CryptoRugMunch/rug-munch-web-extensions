@@ -8,6 +8,14 @@
 import { scanToken } from "../services/api";
 import { extractMintFromUrl } from "../utils/shadowInject";
 
+// __rms_guard: Prevent double injection (Safari programmatic + declarative)
+const __rms_guard_key = '__rms_jupiter_injected';
+if ((window as any)[__rms_guard_key]) {
+  // Content script already running — skip
+} else {
+  (window as any)[__rms_guard_key] = true;
+
+
 // Jupiter uses URL params: /swap/SOL-MINT
 async function checkSwapTarget() {
   const mint = extractMintFromUrl(window.location.href);
@@ -68,3 +76,5 @@ const observer = new MutationObserver(() => {
   }
 });
 observer.observe(document.body, { childList: true, subtree: true });
+
+} // end __rms_guard

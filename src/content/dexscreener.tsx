@@ -10,6 +10,14 @@ import { RiskBadge } from "../components/RiskBadge";
 import { scanToken, batchScan } from "../services/api";
 import { injectComponent, waitForElement, extractMintFromUrl, removeAll } from "../utils/shadowInject";
 
+// __rms_guard: Prevent double injection (Safari programmatic + declarative)
+const __rms_guard_key = '__rms_dexscreener_injected';
+if ((window as any)[__rms_guard_key]) {
+  // Content script already running — skip
+} else {
+  (window as any)[__rms_guard_key] = true;
+
+
 let currentMint: string | null = null;
 let scanInProgress = false;
 
@@ -124,3 +132,5 @@ window.addEventListener("popstate", () => {
   removeAll();
   setTimeout(injectRiskBadge, 1000);
 });
+
+} // end __rms_guard

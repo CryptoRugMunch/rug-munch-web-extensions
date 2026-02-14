@@ -14,7 +14,8 @@
     "activeTab",
     "sidePanel",
     "contextMenus",
-    "alarms"
+    "alarms",
+    "scripting"
   ],
   "host_permissions": [
     "https://dexscreener.com/*",

@@ -9,6 +9,14 @@ import { RiskBadge } from "../components/RiskBadge";
 import { scanToken } from "../services/api";
 import { injectComponent, waitForElement, removeAll } from "../utils/shadowInject";
 
+// __rms_guard: Prevent double injection (Safari programmatic + declarative)
+const __rms_guard_key = '__rms_gmgn_injected';
+if ((window as any)[__rms_guard_key]) {
+  // Content script already running — skip
+} else {
+  (window as any)[__rms_guard_key] = true;
+
+
 let currentMint: string | null = null;
 
 function extractMint(): string | null {
@@ -106,3 +114,5 @@ const observer = new MutationObserver(() => {
   }
 });
 observer.observe(document.body, { childList: true, subtree: true });
+
+} // end __rms_guard

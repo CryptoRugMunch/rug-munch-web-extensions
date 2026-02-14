@@ -299,3 +299,62 @@ function isWalletSite(url: string): boolean {
   ];
   return patterns.some((p) => url.includes(p));
 }
+
+
+// ─── Programmatic Content Script Injection (Safari iOS fix) ─────
+// Safari iOS has a known bug where declarative content_scripts in manifest.json
+// don't reliably inject on every page load. This uses chrome.scripting.executeScript
+// as a fallback, triggered by tab URL changes.
+
+const CONTENT_SCRIPT_PATTERNS: Record<string, string[]> = {
+  "dexscreener.com": ["*://dexscreener.com/*"],
+  "pump.fun": ["*://pump.fun/*"],
+  "jup.ag": ["*://jup.ag/*"],
+  "gmgn.ai": ["*://gmgn.ai/*"],
+  "bullx.io": ["*://bullx.io/*"],
+  "birdeye.so": ["*://birdeye.so/*"],
+  "raydium.io": ["*://raydium.io/*"],
+  "photon-sol.tinyastro.io": ["*://photon-sol.tinyastro.io/*"],
+};
+
+function getContentScriptForUrl(url: string): string | null {
+  try {
+    const hostname = new URL(url).hostname;
+    for (const [site] of Object.entries(CONTENT_SCRIPT_PATTERNS)) {
+      if (hostname.includes(site)) return site;
+    }
+  } catch {}
+  return null;
+}
+
+// Map site hostname → content script file from manifest
+function getScriptFiles(site: string): string[] {
+  const manifest = chrome.runtime.getManifest();
+  const cs = manifest.content_scripts || [];
+  for (const entry of cs) {
+    const matches = entry.matches || [];
+    if (matches.some((m: string) => m.includes(site))) {
+      return entry.js || [];
+    }
+  }
+  return [];
+}
+
+// Inject content scripts programmatically when tabs navigate to supported sites
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status !== "complete" || !tab.url) return;
+
+  const site = getContentScriptForUrl(tab.url);
+  if (!site) return;
+
+  const files = getScriptFiles(site);
+  if (files.length === 0) return;
+
+  // Try programmatic injection — will no-op if declarative already ran (guard check)
+  chrome.scripting.executeScript({
+    target: { tabId },
+    files,
+  }).catch(() => {
+    // Expected to fail sometimes (e.g. restricted pages, permissions not granted)
+  });
+});
