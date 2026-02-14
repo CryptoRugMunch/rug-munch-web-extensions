@@ -6,6 +6,7 @@
  */
 
 import { getApiBase } from "../utils/config";
+import type { RiskBreakdown } from "../types/scan";
 
 let _apiBaseCache: string | null = null;
 async function getApiBaseUrl(): Promise<string> {
@@ -31,6 +32,16 @@ export interface ScanResult {
   risk_factors?: string[];
   not_scanned?: boolean;
   live_scanned?: boolean;
+  // Rich risk breakdown (from scan_cache.result_json)
+  risk_breakdown?: RiskBreakdown;
+  token_age_days?: number | null;
+  volume_24h?: number | null;
+  price_change_24h?: number | null;
+  txns_24h_buys?: number | null;
+  txns_24h_sells?: number | null;
+  freeze_authority?: boolean | null;
+  mint_authority?: boolean | null;
+  creator_address?: string | null;
 }
 
 export interface ExtScanResponse {

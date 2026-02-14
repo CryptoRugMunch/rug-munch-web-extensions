@@ -21,6 +21,7 @@ import MarcusChat from "./MarcusChat";
 import { scanToken, type ScanResult, type ExtScanResponse } from "../services/api";
 import { trackScan } from "../services/analytics";
 import { riskColor, riskLabel, riskEmoji, COLORS } from "../utils/designTokens";
+import RiskBreakdownView from "../components/RiskBreakdown";
 import { extractMintFromUrl } from "../utils/shadowInject";
 import { useAutoLink } from "../hooks/useAutoLink";
 
@@ -403,11 +404,13 @@ const Popup: React.FC = () => {
 };
 
 const ScanResultCard: React.FC<{ result: ScanResult }> = ({ result }) => {
+  const [showBreakdown, setShowBreakdown] = useState(false);
   const score = result.risk_score;
   const color = riskColor(score);
   const label = riskLabel(score);
   const emoji = riskEmoji(score);
   const hasData = score != null;
+  const hasBreakdown = result.risk_breakdown && Object.keys(result.risk_breakdown).length > 0;
 
   return (
     <div style={{
@@ -464,10 +467,10 @@ const ScanResultCard: React.FC<{ result: ScanResult }> = ({ result }) => {
         <MetricRow label="Liquidity" value={formatUsd(result.liquidity_usd)} />
         <MetricRow label="Holders" value={result.holder_count ? result.holder_count.toLocaleString() : "—"} />
         <MetricRow label="Top 10 %" value={result.top_10_holder_percent ? `${result.top_10_holder_percent.toFixed(1)}%` : "—"} />
-        <MetricRow label="Age" value={formatAge(result.created_at)} />
+        <MetricRow label="Age" value={result.token_age_days != null ? formatAgeDays(result.token_age_days) : formatAge(result.created_at)} />
       </div>
 
-      {/* Risk factors */}
+      {/* Quick risk flags */}
       {result.risk_factors && result.risk_factors.length > 0 && (
         <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${COLORS.border}` }}>
           <div style={{ fontSize: 10, color: COLORS.textMuted, marginBottom: 4 }}>⚠️ Risk Factors:</div>
@@ -476,6 +479,37 @@ const ScanResultCard: React.FC<{ result: ScanResult }> = ({ result }) => {
               • {f}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Expand/collapse breakdown toggle */}
+      {hasBreakdown && (
+        <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${COLORS.border}` }}>
+          <button
+            onClick={() => setShowBreakdown(!showBreakdown)}
+            style={{
+              width: "100%", padding: "8px 0", borderRadius: 6,
+              border: `1px solid ${showBreakdown ? color : COLORS.purple}40`,
+              backgroundColor: showBreakdown ? `${color}10` : `${COLORS.purple}10`,
+              color: showBreakdown ? color : COLORS.purpleLight,
+              fontSize: 11, fontWeight: 600, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              transition: "all 0.2s",
+            }}
+          >
+            <span>{showBreakdown ? "▲" : "▼"}</span>
+            <span>{showBreakdown ? "Hide" : "Show"} Detailed Analysis</span>
+            <span style={{ fontSize: 9, opacity: 0.7 }}>
+              ({Object.values(result.risk_breakdown!).reduce((s, c) => s + (c?.items?.length || 0), 0)} metrics)
+            </span>
+          </button>
+        </div>
+      )}
+
+      {/* Detailed risk breakdown */}
+      {showBreakdown && result.risk_breakdown && (
+        <div style={{ marginTop: 8 }}>
+          <RiskBreakdownView breakdown={result.risk_breakdown} />
         </div>
       )}
 
@@ -541,6 +575,14 @@ function formatUsd(value: number | undefined): string {
   if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
   return `$${value.toFixed(2)}`;
+}
+
+function formatAgeDays(days: number | null | undefined): string {
+  if (days == null) return "—";
+  if (days < 1) return "<1 day";
+  if (days < 30) return `${Math.floor(days)}d`;
+  if (days < 365) return `${Math.floor(days / 30)}mo`;
+  return `${Math.floor(days / 365)}y`;
 }
 
 function formatAge(createdAt: string | undefined | null): string {
