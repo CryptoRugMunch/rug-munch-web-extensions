@@ -49,6 +49,15 @@ const targets = [
 
 let allPassed = true;
 
+// Inline content scripts for Safari (fix dynamic import() blocking on iOS)
+console.log("🔧 Inlining content scripts for Safari...");
+try {
+  execSync('node scripts/inline-safari-cs.cjs', { cwd: path.join(__dirname, ".."), stdio: "pipe" });
+  console.log("✅ Content scripts inlined");
+} catch (e) {
+  console.warn("⚠️ Content script inlining failed:", e.message.split("\n")[0]);
+}
+
 for (const target of targets) {
   const outDir = path.join(__dirname, "..", target.dir);
 
