@@ -13,7 +13,7 @@ import { getApiBase } from "../utils/config";
 import { scanToken, type ScanResult } from "../services/api";
 import { riskEmoji } from "../utils/designTokens";
 import { extractMintFromUrl } from "../utils/shadowInject";
-import { Renderer, ActionProvider, StateProvider } from "@json-render/react";
+import { Renderer, JSONUIProvider } from "@json-render/react";
 import { registry, scanToSpec } from "../ui-catalog";
 
 interface Message {
@@ -155,11 +155,9 @@ const InlineScanCard: React.FC<{ data: ScanResult }> = ({ data }) => {
 
   return (
     <div style={{ margin: "4px 0", maxWidth: "100%" }}>
-      <StateProvider initialState={{}}>
-        <ActionProvider handlers={handlers}>
-          <Renderer spec={spec as any} registry={registry} />
-        </ActionProvider>
-      </StateProvider>
+      <JSONUIProvider registry={registry} initialState={{}} handlers={handlers}>
+        <Renderer spec={spec as any} registry={registry} />
+      </JSONUIProvider>
     </div>
   );
 };

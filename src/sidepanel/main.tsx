@@ -40,7 +40,7 @@ const SidePanel: React.FC = () => {
   const [linked, setLinked] = useState(false);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [detectedMint, setDetectedMint] = useState<string | null>(null);
-  const [msgCount, setMsgCount] = useState(0);
+  const [msgCount] = useState(0);
   const [lastScanResult, setLastScanResult] = useState<ScanResult | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -52,6 +52,22 @@ const SidePanel: React.FC = () => {
       setTier(data.tier || "free");
       setLinked(!!data.linked_telegram);
       setAuthToken(data.auth_token || null);
+
+      // Fetch real tier + usage from server
+      if (data.auth_token) {
+        import("../utils/config").then(({ getApiBase }) => {
+          getApiBase().then(base => {
+            fetch(`${base}/ext/tier`, {
+              headers: { "Authorization": `Bearer ${data.auth_token}` }
+            })
+            .then(r => r.ok ? r.json() : null)
+            .then(info => {
+              if (info?.tier) setTier(info.tier);
+            })
+            .catch(() => {});
+          });
+        });
+      }
     });
 
     // Listen for tier changes
@@ -111,14 +127,10 @@ const SidePanel: React.FC = () => {
     const text = input.trim();
     if (!text || loading) return;
 
-    if (msgCount >= msgLimit) {
-      addMessage("system", `⏳ Rate limit reached (${msgLimit}/day for ${tier} tier). ${tier === "free" || tier === "free_linked" ? "Upgrade your tier for more scans." : "Take a breath — even Stoics rest."}`);
-      return;
-    }
+    // Rate limiting handled server-side (Valkey)
 
     setInput("");
     setLoading(true);
-    setMsgCount(c => c + 1);
     addMessage("user", text);
 
     const lowerText = text.toLowerCase();

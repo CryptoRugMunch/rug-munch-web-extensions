@@ -70,8 +70,9 @@ manifest.permissions = manifest.permissions.filter(
   (p) => !["sidePanel"].includes(p)
 );
 
-// Set version to 1.0.0 for store submission
-manifest.version = "1.0.0";
+// Use version from package.json
+const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "../package.json"), "utf-8"));
+manifest.version = pkg.version;
 
 // Remove minimum_chrome_version
 delete manifest.minimum_chrome_version;

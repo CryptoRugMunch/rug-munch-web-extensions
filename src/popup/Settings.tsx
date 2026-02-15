@@ -80,10 +80,12 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
   // ─── Wallet Sign-In ───────────────────────────────────────────
   // Platform detection
   const isSafariIOS = /Safari/.test(navigator.userAgent) && /iPhone|iPad/.test(navigator.userAgent);
+  const isFirefox = navigator.userAgent.includes("Firefox");
   const [deeplinkStatus, setDeeplinkStatus] = useState<string | null>(null);
 
   // Phantom detection state
   const [phantomAvailable, setPhantomAvailable] = useState<boolean | null>(null);
+  const showDeeplinkPrimary = isSafariIOS || isFirefox || phantomAvailable === false;
 
   // Detect Phantom on mount
   useEffect(() => {
@@ -285,7 +287,7 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
             /* Wallet Auth — Phantom signing or manual fallback */
             <div style={{ padding: 12, borderRadius: 8, backgroundColor: COLORS.bgCard, marginBottom: 8 }}>
               {/* Primary: Phantom sign-in (extension bridge or deeplink) */}
-              {isSafariIOS ? (
+              {showDeeplinkPrimary ? (
                 <>
                   <button onClick={handlePhantomDeeplink} disabled={walletLoading}
                     style={{
@@ -310,7 +312,7 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
                   <button onClick={handlePhantomAuth} disabled={walletLoading}
                     style={{
                       width: "100%", padding: "10px 0", borderRadius: 8,
-                      backgroundColor: phantomAvailable !== false ? "#AB9FF2" : COLORS.border,
+                      backgroundColor: phantomAvailable ? "#AB9FF2" : COLORS.border,
                       color: "#fff", border: "none", fontSize: 13, fontWeight: 700,
                       cursor: walletLoading ? "default" : "pointer",
                       display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
@@ -319,7 +321,7 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
                     }}>
                     {walletLoading ? "Connecting..." : "👻 Sign In with Phantom"}
                   </button>
-                  {phantomAvailable === false && (
+                  {!phantomAvailable && (
                     <div style={{ fontSize: 10, color: COLORS.textMuted, textAlign: "center", marginBottom: 8, padding: "4px 8px", borderRadius: 4, backgroundColor: `${COLORS.gold}10` }}>
                       ⚠️ Phantom not detected on current tab. Open a crypto site (DexScreener, Pump.fun, etc.) and try again.
                     </div>

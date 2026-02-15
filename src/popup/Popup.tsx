@@ -22,7 +22,7 @@ import { scanToken, type ScanResult, type ExtScanResponse } from "../services/ap
 import { trackScan } from "../services/analytics";
 import { riskColor, riskLabel, riskEmoji, COLORS } from "../utils/designTokens";
 import RiskBreakdownView from "../components/RiskBreakdown";
-import { Renderer, ActionProvider, StateProvider } from "@json-render/react";
+import { Renderer, JSONUIProvider } from "@json-render/react";
 import { RenderErrorBoundary } from "../ui-catalog/ErrorBoundary";
 import { registry, scanToSpec } from "../ui-catalog";
 import { extractMintFromUrl } from "../utils/shadowInject";
@@ -419,8 +419,8 @@ const Popup: React.FC = () => {
       {/* Scan Result — json-render ScoreCard */}
       {result && !scanning && (
         <RenderErrorBoundary fallback={<_ScanResultCard result={result} />}>
-        <StateProvider initialState={{}}>
-        <ActionProvider handlers={{
+        
+        <JSONUIProvider registry={registry} initialState={{}} handlers={{
           share_result: () => {
             const shareText = `${riskEmoji(result.risk_score ?? 0)} $${result.token_symbol || "?"} Risk: ${result.risk_score ?? "?"}/100\nPrice: ${result.price_usd ? `$${formatPrice(result.price_usd)}` : "—"} | Liq: ${formatUsd(result.liquidity_usd)}\nScanned by Rug Munch Intelligence 🗿 https://t.me/rug_munchy_bot`;
             navigator.clipboard.writeText(shareText);
@@ -431,8 +431,7 @@ const Popup: React.FC = () => {
           full_scan: () => setView("marcus"),
         }}>
           <Renderer spec={scanToSpec(result) as any} registry={registry} />
-        </ActionProvider>
-        </StateProvider>
+        </JSONUIProvider>
         </RenderErrorBoundary>
       )}
 
