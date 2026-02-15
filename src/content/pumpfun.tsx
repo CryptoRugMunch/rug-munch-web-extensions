@@ -74,7 +74,7 @@ async function injectRiskBadge() {
           font-weight: 600; z-index: 99999; position: relative;
         `;
         const emoji = risk_score >= 75 ? "🚨" : "⚠️";
-        banner.innerHTML = `${emoji} Rug Munch Intelligence: This token has a risk score of <strong>${risk_score}/100</strong> — proceed with caution.`;
+        banner.textContent = ''; banner.append(`${emoji} Rug Munch Intelligence: This token has a risk score of `); const strong = document.createElement('strong'); strong.textContent = `${risk_score}/100`; banner.append(strong); banner.append(' — proceed with caution.');
 
         // Add close button
         const close = document.createElement("span");

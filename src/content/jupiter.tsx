@@ -55,11 +55,16 @@ async function checkSwapTarget() {
     color: ${isCritical ? '#FF4757' : '#FF8C00'}; font-weight: 500;
   `;
   const emoji = isCritical ? "🚨" : "⚠️";
-  warning.innerHTML = `
-    ${emoji} <strong>Rug Munch Intelligence:</strong> $${token_symbol || 'Unknown'} has a risk score of
-    <strong>${risk_score}/100</strong>.
-    ${isCritical ? 'This token shows critical rug indicators.' : 'Exercise caution with this swap.'}
-  `;
+  warning.textContent = '';
+  warning.append(`${emoji} `);
+  const label = document.createElement('strong');
+  label.textContent = 'Rug Munch Intelligence:';
+  warning.append(label);
+  warning.append(` $${token_symbol || 'Unknown'} has a risk score of `);
+  const scoreEl = document.createElement('strong');
+  scoreEl.textContent = `${risk_score}/100`;
+  warning.append(scoreEl);
+  warning.append(`. ${isCritical ? 'This token shows critical rug indicators.' : 'Exercise caution with this swap.'}`);
 
   swapButton.parentElement?.insertBefore(warning, swapButton);
 }
