@@ -16,7 +16,9 @@
     "archive:safari": "node scripts/archive-safari.cjs",
     "archive:macos": "node scripts/archive-safari.cjs --macos-only",
     "archive:ios": "node scripts/archive-safari.cjs --ios-only",
-    "archive:upload": "node scripts/archive-safari.cjs --upload"
+    "archive:upload": "node scripts/archive-safari.cjs --upload",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "lucide-react": "^0.562.0",
@@ -32,9 +34,11 @@
     "@types/webextension-polyfill": "^0.12.4",
     "@vitejs/plugin-react": "^5.1.1",
     "autoprefixer": "^10.4.23",
+    "jsdom": "^28.1.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.19",
     "typescript": "~5.9.3",
-    "vite": "^6.3.5"
+    "vite": "^6.3.5",
+    "vitest": "^4.0.18"
   }
 }
