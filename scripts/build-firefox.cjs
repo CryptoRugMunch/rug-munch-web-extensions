@@ -29,6 +29,17 @@ manifest.browser_specific_settings = {
   gecko: {
     id: "scanner@cryptorugmunch.com",
     strict_min_version: "109.0",
+    data_collection_permissions: {
+      // Token addresses from pages are sent to our API for risk scoring.
+      // This counts as "websiteContent" (data visible on a webpage).
+      // No PII, no browsing history, no search terms, no location.
+      required: [
+        "websiteContent"   // We read token addresses from DeFi pages and send to our API
+      ],
+      optional: [
+        "technicalAndInteraction"  // Optional: crash reports, usage stats
+      ]
+    },
   },
 };
 
@@ -57,6 +68,9 @@ if (manifest.side_panel) {
 manifest.permissions = manifest.permissions.filter(
   (p) => !["sidePanel"].includes(p)
 );
+
+// Set version to 1.0.0 for store submission
+manifest.version = "1.0.0";
 
 // Remove minimum_chrome_version
 delete manifest.minimum_chrome_version;
