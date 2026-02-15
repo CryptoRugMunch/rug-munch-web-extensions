@@ -80,12 +80,12 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
   // ─── Wallet Sign-In ───────────────────────────────────────────
   // Platform detection
   const isSafariIOS = /Safari/.test(navigator.userAgent) && /iPhone|iPad/.test(navigator.userAgent);
-  const isFirefox = navigator.userAgent.includes("Firefox");
   const [deeplinkStatus, setDeeplinkStatus] = useState<string | null>(null);
 
   // Phantom detection state
   const [phantomAvailable, setPhantomAvailable] = useState<boolean | null>(null);
-  const showDeeplinkPrimary = isSafariIOS || isFirefox || phantomAvailable === false;
+  const isSafariMac = /Safari/.test(navigator.userAgent) && /Macintosh/.test(navigator.userAgent) && !/Chrome|Firefox/.test(navigator.userAgent);
+  const showDeeplinkPrimary = isSafariIOS; // Only iOS gets deeplink as primary
 
   // Detect Phantom on mount
   useEffect(() => {
@@ -325,6 +325,18 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
                     <div style={{ fontSize: 10, color: COLORS.textMuted, textAlign: "center", marginBottom: 8, padding: "4px 8px", borderRadius: 4, backgroundColor: `${COLORS.gold}10` }}>
                       ⚠️ Phantom not detected on current tab. Open a crypto site (DexScreener, Pump.fun, etc.) and try again.
                     </div>
+                  )}
+                  {phantomAvailable === false && !isSafariMac && (
+                    <button onClick={handlePhantomDeeplink} disabled={walletLoading}
+                      style={{
+                        width: "100%", padding: "8px 0", borderRadius: 8,
+                        backgroundColor: "transparent",
+                        color: COLORS.purple, border: `1px solid ${COLORS.purple}40`,
+                        fontSize: 11, fontWeight: 600, cursor: "pointer",
+                        marginBottom: 8,
+                      }}>
+                      📱 Open Phantom App Instead
+                    </button>
                   )}
                 </>
               )}

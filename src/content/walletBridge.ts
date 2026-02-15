@@ -40,6 +40,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 /**
  * Inject a script into the page's main world to access window.phantom.solana.
  * Uses window.postMessage to relay results back to this content script.
+ *
+ * Chrome: inline script element injection
+ * Firefox: wrappedJSObject for direct page context access (more reliable with CSP)
  */
 function injectAndRelay(
   action: string,
@@ -69,7 +72,28 @@ function injectAndRelay(
     sendResponse({ success: false, error: "Wallet operation timed out" });
   }, 60000);
 
-  // Inject the page-level script
+  // Firefox: use wrappedJSObject for direct page context access (bypasses CSP)
+  // Chrome: use inline script injection
+  const isFirefox = typeof (window as any).wrappedJSObject !== "undefined";
+
+  if (isFirefox) {
+    // Firefox content scripts can access page globals via wrappedJSObject
+    try {
+      const pageWin = (window as any).wrappedJSObject;
+
+      // Execute the page script logic directly via page context
+      const scriptBody = `(${pageScript.toString()})("${requestId}", "${action}", ${JSON.stringify(params)});`;
+      pageWin.eval(scriptBody);
+    } catch (e) {
+      // Fallback to script injection if wrappedJSObject fails
+      injectViaScript(requestId, action, params);
+    }
+  } else {
+    injectViaScript(requestId, action, params);
+  }
+}
+
+function injectViaScript(requestId: string, action: string, params: Record<string, any>) {
   const script = document.createElement("script");
   script.textContent = `(${pageScript.toString()})("${requestId}", "${action}", ${JSON.stringify(params)});`;
   document.documentElement.appendChild(script);
