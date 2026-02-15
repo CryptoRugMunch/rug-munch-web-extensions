@@ -1,19 +1,15 @@
 /**
  * DexScreener Content Script
  *
- * Injects risk badges on Solana token pages.
- * 
- * CRITICAL: DexScreener URLs contain PAIR/POOL addresses, NOT token mints.
- * We must extract the actual token mint from the page DOM (explorer links,
- * __NEXT_DATA__, etc.) — never trust the URL path for the token address.
+ * Auto-injects a rich ScoreCard (json-render) on Solana token pages.
  *
- * Uses Shadow DOM for style isolation.
+ * CRITICAL: DexScreener URLs contain PAIR/POOL addresses, NOT token mints.
+ * We extract the actual token mint from Solscan/Explorer links in the DOM.
  */
 
-import { RiskBadge } from "../components/RiskBadge";
 import { scanToken } from "../services/api";
-import { injectComponent, waitForElement, removeAll } from "../utils/shadowInject";
 import { extractTokenFromDexScreener, extractChainFromUrl } from "../utils/tokenExtractor";
+import { injectScoreCard, removeAllCards } from "../ui-catalog/injectCard";
 
 // __rms_guard: Prevent double injection (Safari programmatic + declarative)
 const __rms_guard_key = '__rms_dexscreener_injected';
@@ -27,26 +23,21 @@ let scanInProgress = false;
 const MAX_RETRIES = 5;
 
 /**
- * Extract token mint from the page. Retries with backoff because
- * DexScreener is a SPA and explorer links may not be in DOM immediately.
+ * Extract token mint from the page with retries for SPA loading.
  */
 async function getTokenMint(): Promise<string | null> {
-  // Try immediate extraction
   let mint = extractTokenFromDexScreener();
   if (mint) return mint;
 
-  // DexScreener is a SPA — DOM may not have explorer links yet.
-  // Retry with increasing delays.
   for (let i = 0; i < MAX_RETRIES; i++) {
     await new Promise(r => setTimeout(r, 500 * (i + 1)));
     mint = extractTokenFromDexScreener();
     if (mint) return mint;
   }
-
   return null;
 }
 
-async function injectRiskBadge() {
+async function injectRiskCard() {
   if (scanInProgress) return;
 
   const mint = await getTokenMint();
@@ -55,7 +46,7 @@ async function injectRiskBadge() {
   currentMint = mint;
   scanInProgress = true;
 
-  // Notify popup of detected token
+  // Notify popup/background of detected token
   try {
     chrome.runtime.sendMessage({
       type: "PAGE_TOKEN_DETECTED",
@@ -66,53 +57,22 @@ async function injectRiskBadge() {
   } catch {}
 
   try {
-    // Remove previous badges
-    removeAll();
+    removeAllCards();
 
     const chain = extractChainFromUrl(window.location.href);
     const result = await scanToken(mint, chain);
-    if (!result.success || !result.data) return;
-
-    const { risk_score, token_symbol } = result.data;
+    if (!result.success || !result.data || result.data.not_scanned) return;
 
     // Update extension badge icon
     try {
-      chrome.runtime.sendMessage({
-        type: "UPDATE_BADGE",
-        score: risk_score,
-      });
+      chrome.runtime.sendMessage({ type: "UPDATE_BADGE", score: result.data.risk_score });
     } catch {}
 
-    // Find injection point — DexScreener header area
-    const headerEl = await waitForElement(
-      // DexScreener class patterns (they change periodically)
-      'h2.chakra-heading, ' +
-      '[class*="pair-header"] h2, ' +
-      'div[class*="ds-dex-table-row-base"] h2, ' +
-      'h1[class*="chakra"], ' +
-      // Fallback: the main heading that contains token name
-      'header h2, header h1, ' +
-      // Very generic fallback
-      'h2'
-    );
-
-    if (headerEl) {
-      injectComponent(
-        `badge-${mint}`,
-        headerEl,
-        RiskBadge,
-        {
-          score: risk_score,
-          symbol: token_symbol,
-          mint,
-          onFullScan: () => {
-            chrome.runtime.sendMessage({ type: "OPEN_SIDE_PANEL" });
-          },
-        },
-        "after"
-      );
-    }
-
+    // Inject the full ScoreCard as a floating panel
+    injectScoreCard(`dex-${mint}`, document.body, result.data, {
+      position: "float-right",
+      compact: false,
+    });
 
   } catch (e) {
     console.error("[RMS] DexScreener injection error:", e);
@@ -122,33 +82,29 @@ async function injectRiskBadge() {
 }
 
 // Run on page load
-injectRiskBadge();
+injectRiskCard();
 
-// Watch for SPA navigation (DexScreener is a SPA)
+// Watch for SPA navigation
 let lastUrl = window.location.href;
 const urlObserver = new MutationObserver(() => {
   if (window.location.href !== lastUrl) {
     lastUrl = window.location.href;
     currentMint = null;
-    removeAll();
-    // Delay for SPA content to render
-    setTimeout(injectRiskBadge, 1500);
+    removeAllCards();
+    setTimeout(injectRiskCard, 1500);
   }
 });
-
 urlObserver.observe(document.body, { childList: true, subtree: true });
 
-// Also handle popstate for back/forward navigation
 window.addEventListener("popstate", () => {
   currentMint = null;
-  removeAll();
-  setTimeout(injectRiskBadge, 1500);
+  removeAllCards();
+  setTimeout(injectRiskCard, 1500);
 });
 
 // Listen for popup requesting the detected token
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "GET_PAGE_TOKEN") {
-    // Try to get token from DOM
     const mint = extractTokenFromDexScreener();
     const chain = extractChainFromUrl(window.location.href);
     sendResponse({ mint, chain, url: window.location.href });

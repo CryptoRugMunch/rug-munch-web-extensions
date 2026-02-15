@@ -22,6 +22,8 @@ import { scanToken, type ScanResult, type ExtScanResponse } from "../services/ap
 import { trackScan } from "../services/analytics";
 import { riskColor, riskLabel, riskEmoji, COLORS } from "../utils/designTokens";
 import RiskBreakdownView from "../components/RiskBreakdown";
+import { Renderer, ActionProvider } from "@json-render/react";
+import { registry, scanToSpec } from "../ui-catalog";
 import { extractMintFromUrl } from "../utils/shadowInject";
 import { useAutoLink } from "../hooks/useAutoLink";
 
@@ -413,8 +415,21 @@ const Popup: React.FC = () => {
         </div>
       )}
 
-      {/* Scan Result */}
-      {result && !scanning && <ScanResultCard result={result} />}
+      {/* Scan Result — json-render ScoreCard */}
+      {result && !scanning && (
+        <ActionProvider handlers={{
+          share_result: () => {
+            const shareText = `${riskEmoji(result.risk_score ?? 0)} $${result.token_symbol || "?"} Risk: ${result.risk_score ?? "?"}/100\nPrice: ${result.price_usd ? `$${formatPrice(result.price_usd)}` : "—"} | Liq: ${formatUsd(result.liquidity_usd)}\nScanned by Rug Munch Intelligence 🗿 https://t.me/rug_munchy_bot`;
+            navigator.clipboard.writeText(shareText);
+          },
+          copy_address: () => navigator.clipboard.writeText(result.token_address),
+          open_explorer: () => window.open(`https://solscan.io/token/${result.token_address}`, "_blank"),
+          open_chat: () => setView("marcus"),
+          full_scan: () => setView("marcus"),
+        }}>
+          <Renderer spec={scanToSpec(result) as any} registry={registry} />
+        </ActionProvider>
+      )}
 
       {/* Footer */}
       <div style={{
@@ -458,7 +473,8 @@ const Popup: React.FC = () => {
   );
 };
 
-const ScanResultCard: React.FC<{ result: ScanResult }> = ({ result }) => {
+// @ts-ignore — kept as fallback
+const _ScanResultCard: React.FC<{ result: ScanResult }> = ({ result }) => {
   const [showBreakdown, setShowBreakdown] = useState(false);
   const score = result.risk_score;
   const color = riskColor(score);

@@ -1,122 +1,68 @@
 /**
  * Birdeye Content Script
  *
- * Injects risk badges on token pages.
- * Birdeye URLs: birdeye.so/token/MINT?chain=solana
+ * Auto-injects a json-render ScoreCard on token pages.
  */
 
-import { RiskBadge } from "../components/RiskBadge";
 import { scanToken } from "../services/api";
-import { injectComponent, waitForElement, removeAll } from "../utils/shadowInject";
+import { extractMintFromUrl } from "../utils/shadowInject";
+import { injectScoreCard, removeAllCards } from "../ui-catalog/injectCard";
 
-// __rms_guard: Prevent double injection (Safari programmatic + declarative)
 const __rms_guard_key = '__rms_birdeye_injected';
 if ((window as any)[__rms_guard_key]) {
-  // Content script already running — skip
+  // Already running
 } else {
   (window as any)[__rms_guard_key] = true;
 
-
 let currentMint: string | null = null;
+let scanInProgress = false;
 
-function extractMint(): string | null {
-  const match = window.location.href.match(/birdeye\.so\/token\/([A-Za-z0-9]{32,50})/);
-  return match ? match[1] : null;
-}
-
-async function injectRiskBadge() {
-  const mint = extractMint();
+async function injectRiskCard() {
+  if (scanInProgress) return;
+  const mint = extractMintFromUrl(window.location.href);
   if (!mint || mint === currentMint) return;
 
   currentMint = mint;
-  removeAll();
+  scanInProgress = true;
 
   try {
+    removeAllCards();
     const result = await scanToken(mint);
     if (!result.success || !result.data || result.data.not_scanned) return;
 
-    const { risk_score, token_symbol } = result.data;
+    try {
+      chrome.runtime.sendMessage({ type: "UPDATE_BADGE", score: result.data.risk_score });
+      chrome.runtime.sendMessage({
+        type: "PAGE_TOKEN_DETECTED", mint, chain: "solana", url: window.location.href,
+      });
+    } catch {}
 
-    chrome.runtime.sendMessage({ type: "UPDATE_BADGE", score: risk_score });
-
-    // Birdeye token page
-    const headerEl = await waitForElement(
-      '[class*="token-name"], ' +
-      '[class*="TokenName"], ' +
-      '[class*="pair-title"], ' +
-      '.token-overview h1, ' +
-      'h1[class*="text"]'
-    );
-
-    if (headerEl) {
-      injectComponent(
-        `badge-${mint}`,
-        headerEl,
-        RiskBadge,
-        {
-          score: risk_score,
-          symbol: token_symbol,
-          mint,
-          onFullScan: () => chrome.runtime.sendMessage({ type: "OPEN_SIDE_PANEL" }),
-        },
-        "after"
-      );
-    }
-
-    if (risk_score != null && risk_score >= 65) {
-      injectWarningBanner(risk_score);
-    }
+    injectScoreCard(`birdeye-${mint}`, document.body, result.data, {
+      position: "float-right",
+    });
   } catch (e) {
     console.error("[RMS] Birdeye injection error:", e);
+  } finally {
+    scanInProgress = false;
   }
 }
 
-function injectWarningBanner(score: number) {
-  if (document.getElementById("rms-warning-banner")) return;
-  const main = document.querySelector("main") || document.querySelector("#__next") || document.body;
-  if (!main) return;
-
-  const banner = document.createElement("div");
-  banner.id = "rms-warning-banner";
-  banner.style.cssText = `
-    width: 100%; padding: 10px 16px; background: #FF475720;
-    border-bottom: 2px solid #FF4757; display: flex; align-items: center;
-    gap: 8px; font-family: system-ui; font-size: 13px; color: #FF4757;
-    font-weight: 600; z-index: 99999; position: relative;
-  `;
-  const emoji = score >= 75 ? "🚨" : "⚠️";
-  banner.textContent = ''; banner.append(`${emoji} Rug Munch Intelligence: Risk score `); const strong = document.createElement('strong'); strong.textContent = `${score}/100`; banner.append(strong); banner.append(' — proceed with caution.');
-
-  const close = document.createElement("span");
-  close.textContent = "✕";
-  close.style.cssText = "cursor:pointer; margin-left:auto; opacity:0.6;";
-  close.onclick = () => banner.remove();
-  banner.appendChild(close);
-
-  main.prepend(banner);
-}
-
-injectRiskBadge();
+injectRiskCard();
 
 let lastUrl = window.location.href;
 const observer = new MutationObserver(() => {
   if (window.location.href !== lastUrl) {
     lastUrl = window.location.href;
     currentMint = null;
-    document.getElementById("rms-warning-banner")?.remove();
-    removeAll();
-    setTimeout(injectRiskBadge, 800);
+    removeAllCards();
+    setTimeout(injectRiskCard, 800);
   }
 });
 observer.observe(document.body, { childList: true, subtree: true });
 
-
-
-// Listen for popup requesting the detected token
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "GET_PAGE_TOKEN") {
-    const mint = currentMint;
-    sendResponse({ mint, chain: "solana", url: window.location.href });
+    sendResponse({ mint: currentMint, chain: "solana", url: window.location.href });
   }
   return false;
 });

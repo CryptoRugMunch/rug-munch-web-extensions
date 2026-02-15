@@ -21,6 +21,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@json-render/core": "^0.6.1",
+    "@json-render/react": "^0.6.1",
     "lucide-react": "^0.562.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
