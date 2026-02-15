@@ -115,4 +115,15 @@ const observer = new MutationObserver(() => {
 });
 observer.observe(document.body, { childList: true, subtree: true });
 
+
+
+// Listen for popup requesting the detected token
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === "GET_PAGE_TOKEN") {
+    const mint = currentMint;
+    sendResponse({ mint, chain: "solana", url: window.location.href });
+  }
+  return false;
+});
+
 } // end __rms_guard

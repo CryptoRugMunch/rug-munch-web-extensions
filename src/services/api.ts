@@ -57,19 +57,7 @@ export interface BatchScanResponse {
   fresh_count: number;
 }
 
-// Rate limit tracking
-let requestCount = 0;
-let windowStart = Date.now();
-const RATE_WINDOW_MS = 86_400_000; // 24 hours (per day)
-
-function checkRateLimit(limit: number): boolean {
-  const now = Date.now();
-  if (now - windowStart > RATE_WINDOW_MS) {
-    requestCount = 0;
-    windowStart = now;
-  }
-  return requestCount < limit;
-}
+// Rate limiting handled server-side (Valkey)
 
 async function getAuthToken(): Promise<string | null> {
   try {
@@ -80,28 +68,10 @@ async function getAuthToken(): Promise<string | null> {
   }
 }
 
-async function getTierLimit(): Promise<number> {
-  try {
-    const result = await chrome.storage.local.get(["tier"]);
-    const tier = result.tier || "free";
-    // Mirrors config.py TIER_LIMITS.scans_per_day
-    const limits: Record<string, number> = {
-      free: 3, free_linked: 3,
-      holder: 15, scout: 30,
-      whale: 999999, analyst: 999999,
-      syndicate: 999999, og: 999999, vip: 999999,
-    };
-    return limits[tier] || 3;
-  } catch {
-    return 10;
-  }
-}
+
 
 export async function scanToken(mint: string, chain = "solana"): Promise<ExtScanResponse> {
-  const limit = await getTierLimit();
-  if (!checkRateLimit(limit)) {
-    return { success: false, cached: false, error: `Rate limit reached (${limit}/day). Upgrade your tier for more scans.` };
-  }
+  // Rate limiting is server-side (Valkey). Client just passes through.
 
   try {
     // Check IndexedDB cache first
@@ -121,7 +91,6 @@ export async function scanToken(mint: string, chain = "solana"): Promise<ExtScan
       body: JSON.stringify({ token_address: mint, chain }),
     });
 
-    requestCount++;
 
     if (!resp.ok) {
       // Return stale cache if available

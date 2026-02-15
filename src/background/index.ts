@@ -29,6 +29,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       break;
     }
 
+    case "PAGE_TOKEN_DETECTED": {
+      // Content script detected a token on the page — store for popup
+      chrome.storage.local.set({
+        detected_token: {
+          mint: message.mint,
+          chain: message.chain || "solana",
+          url: message.url,
+          timestamp: Date.now(),
+        }
+      });
+      break;
+    }
+
     case "OPEN_SIDE_PANEL": {
       const windowId = sender.tab?.windowId;
       if (windowId) {

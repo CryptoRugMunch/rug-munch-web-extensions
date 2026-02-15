@@ -36,6 +36,8 @@ const Popup: React.FC = () => {
   const [tier, setTier] = useState("free");
   const [scanCount, setScanCount] = useState(0);
   const [linked, setLinked] = useState(false);
+  const [scansRemaining, setScansRemaining] = useState<number | null>(null);
+  const [scansToday, setScansToday] = useState<number | null>(null);
   const [activeTabMint, setActiveTabMint] = useState<string | null>(null);
   const autoLink = useAutoLink();
 
@@ -51,10 +53,30 @@ const Popup: React.FC = () => {
 
   // Load state + listen for changes (tier sync after linking)
   useEffect(() => {
-    chrome.storage.local.get(["tier", "scan_count", "linked_telegram"], (data) => {
+    chrome.storage.local.get(["tier", "scan_count", "linked_telegram", "auth_token"], (data) => {
       setTier(data.tier || "free");
       setScanCount(data.scan_count || 0);
       setLinked(!!data.linked_telegram);
+
+      // Fetch real usage from server
+      if (data.auth_token) {
+        import("../utils/config").then(({ getApiBase }) => {
+          getApiBase().then(base => {
+            fetch(`${base}/ext/tier`, {
+              headers: { "Authorization": `Bearer ${data.auth_token}` }
+            })
+            .then(r => r.ok ? r.json() : null)
+            .then(info => {
+              if (info) {
+                if (info.tier) setTier(info.tier);
+                if (info.scans_today != null) setScansToday(info.scans_today);
+                if (info.scans_remaining != null) setScansRemaining(info.scans_remaining);
+              }
+            })
+            .catch(() => {});
+          });
+        });
+      }
     });
 
     // Listen for storage changes (e.g., tier updated after linking)
@@ -80,6 +102,18 @@ const Popup: React.FC = () => {
 
   useEffect(() => {
 
+    // Check for stored detected_token (from content script PAGE_TOKEN_DETECTED)
+    chrome.storage.local.get("detected_token", (data) => {
+      const dt = data.detected_token;
+      if (dt?.mint && Date.now() - (dt.timestamp || 0) < 60000) {
+        // Fresh detection from content script — use it
+        if (!activeTabMint) {
+          setActiveTabMint(dt.mint);
+          setInput(dt.mint);
+        }
+      }
+    });
+
     // Check for pending scan from context menu
     chrome.storage.local.get("pending_scan", (data) => {
       if (data.pending_scan) {
@@ -92,10 +126,29 @@ const Popup: React.FC = () => {
       }
     });
 
-    // Detect mint from active tab
+    // Detect mint from active tab — ask content script first (DexScreener URL = pair, not token)
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]?.url) {
-        const mint = extractMintFromUrl(tabs[0].url);
+      const tab = tabs[0];
+      if (!tab?.url) return;
+      
+      // Try content script first (reliable for DexScreener and other SPAs)
+      if (tab.id) {
+        chrome.tabs.sendMessage(tab.id, { type: "GET_PAGE_TOKEN" }, (resp) => {
+          if (chrome.runtime.lastError || !resp?.mint) {
+            // Content script not available or no token — fall back to URL
+            const mint = extractMintFromUrl(tab.url!);
+            if (mint) {
+              setActiveTabMint(mint);
+              setInput(mint);
+            }
+            return;
+          }
+          // Content script found the real token
+          setActiveTabMint(resp.mint);
+          setInput(resp.mint);
+        });
+      } else {
+        const mint = extractMintFromUrl(tab.url);
         if (mint) {
           setActiveTabMint(mint);
           setInput(mint);
@@ -396,7 +449,9 @@ const Popup: React.FC = () => {
           <span style={{ fontSize: 10, color: COLORS.green }}>✓ Telegram linked</span>
         )}
         <span style={{ fontSize: 10, color: COLORS.textMuted }}>
-          {scanCount} scans today
+          {scansToday != null
+            ? `${scansToday} scans today${scansRemaining != null ? ` · ${scansRemaining} left` : ""}`
+            : `${scanCount} scans today`}
         </span>
       </div>
     </div>

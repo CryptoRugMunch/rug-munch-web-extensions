@@ -118,10 +118,11 @@ export function extractMintFromUrl(url: string): string | null {
     const host = u.hostname;
     const path = u.pathname;
 
-    // DexScreener: /solana/MINT
+    // DexScreener: URL contains PAIR address, NOT token mint.
+    // Use extractTokenFromDexScreener() from tokenExtractor.ts instead.
+    // Return null to force DOM-based extraction.
     if (host.includes("dexscreener.com")) {
-      const m = path.match(/\/solana\/([A-Za-z0-9]{32,50})/);
-      if (m) return m[1];
+      return null;
     }
 
     // Pump.fun: /coin/MINT or /MINT

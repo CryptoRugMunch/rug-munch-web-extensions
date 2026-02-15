@@ -126,4 +126,15 @@ window.addEventListener("popstate", () => {
   setTimeout(injectRiskBadge, 800);
 });
 
+
+
+// Listen for popup requesting the detected token
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === "GET_PAGE_TOKEN") {
+    const mint = currentMint;
+    sendResponse({ mint, chain: "solana", url: window.location.href });
+  }
+  return false;
+});
+
 } // end __rms_guard

@@ -2,13 +2,18 @@
  * DexScreener Content Script
  *
  * Injects risk badges on Solana token pages.
- * Detects token mint from URL, fetches risk score, injects badge.
+ * 
+ * CRITICAL: DexScreener URLs contain PAIR/POOL addresses, NOT token mints.
+ * We must extract the actual token mint from the page DOM (explorer links,
+ * __NEXT_DATA__, etc.) — never trust the URL path for the token address.
+ *
  * Uses Shadow DOM for style isolation.
  */
 
 import { RiskBadge } from "../components/RiskBadge";
-import { scanToken, batchScan } from "../services/api";
-import { injectComponent, waitForElement, extractMintFromUrl, removeAll } from "../utils/shadowInject";
+import { scanToken } from "../services/api";
+import { injectComponent, waitForElement, removeAll } from "../utils/shadowInject";
+import { extractTokenFromDexScreener, extractChainFromUrl } from "../utils/tokenExtractor";
 
 // __rms_guard: Prevent double injection (Safari programmatic + declarative)
 const __rms_guard_key = '__rms_dexscreener_injected';
@@ -17,40 +22,78 @@ if ((window as any)[__rms_guard_key]) {
 } else {
   (window as any)[__rms_guard_key] = true;
 
-
 let currentMint: string | null = null;
 let scanInProgress = false;
+const MAX_RETRIES = 5;
+
+/**
+ * Extract token mint from the page. Retries with backoff because
+ * DexScreener is a SPA and explorer links may not be in DOM immediately.
+ */
+async function getTokenMint(): Promise<string | null> {
+  // Try immediate extraction
+  let mint = extractTokenFromDexScreener();
+  if (mint) return mint;
+
+  // DexScreener is a SPA — DOM may not have explorer links yet.
+  // Retry with increasing delays.
+  for (let i = 0; i < MAX_RETRIES; i++) {
+    await new Promise(r => setTimeout(r, 500 * (i + 1)));
+    mint = extractTokenFromDexScreener();
+    if (mint) return mint;
+  }
+
+  return null;
+}
 
 async function injectRiskBadge() {
-  const mint = extractMintFromUrl(window.location.href);
-  if (!mint || mint === currentMint || scanInProgress) return;
+  if (scanInProgress) return;
+
+  const mint = await getTokenMint();
+  if (!mint || mint === currentMint) return;
 
   currentMint = mint;
   scanInProgress = true;
+
+  // Notify popup of detected token
+  try {
+    chrome.runtime.sendMessage({
+      type: "PAGE_TOKEN_DETECTED",
+      mint,
+      chain: extractChainFromUrl(window.location.href),
+      url: window.location.href,
+    });
+  } catch {}
 
   try {
     // Remove previous badges
     removeAll();
 
-    const result = await scanToken(mint);
+    const chain = extractChainFromUrl(window.location.href);
+    const result = await scanToken(mint, chain);
     if (!result.success || !result.data) return;
 
     const { risk_score, token_symbol } = result.data;
 
-    // Update extension badge
-    chrome.runtime.sendMessage({
-      type: "UPDATE_BADGE",
-      score: risk_score,
-    });
+    // Update extension badge icon
+    try {
+      chrome.runtime.sendMessage({
+        type: "UPDATE_BADGE",
+        score: risk_score,
+      });
+    } catch {}
 
-    // Find injection points on DexScreener
-    // 1. Token header area (next to token name)
+    // Find injection point — DexScreener header area
     const headerEl = await waitForElement(
-      // DexScreener uses various selectors — try common ones
-      '[class*="TokenHeader"] h1, ' +
+      // DexScreener class patterns (they change periodically)
+      'h2.chakra-heading, ' +
       '[class*="pair-header"] h2, ' +
+      'div[class*="ds-dex-table-row-base"] h2, ' +
       'h1[class*="chakra"], ' +
-      '.ds-dex-table-row-token-name'
+      // Fallback: the main heading that contains token name
+      'header h2, header h1, ' +
+      // Very generic fallback
+      'h2'
     );
 
     if (headerEl) {
@@ -70,38 +113,7 @@ async function injectRiskBadge() {
       );
     }
 
-    // 2. Batch scan visible tokens in list views
-    const tokenLinks = document.querySelectorAll('a[href*="/solana/"]');
-    const listMints: string[] = [];
-    const linkMap = new Map<string, Element>();
 
-    for (const link of Array.from(tokenLinks).slice(0, 20)) {
-      const linkMint = extractMintFromUrl((link as HTMLAnchorElement).href);
-      if (linkMint && linkMint !== mint && !linkMap.has(linkMint)) {
-        listMints.push(linkMint);
-        linkMap.set(linkMint, link);
-      }
-    }
-
-    if (listMints.length > 0) {
-      try {
-        const batchResult = await batchScan(listMints);
-        for (const [batchMint, data] of Object.entries(batchResult.results)) {
-          const linkEl = linkMap.get(batchMint);
-          if (linkEl && data.risk_score !== null && data.risk_score !== undefined) {
-            injectComponent(
-              `list-badge-${batchMint}`,
-              linkEl,
-              RiskBadge,
-              { score: data.risk_score, symbol: data.token_symbol, mint: batchMint, compact: true },
-              "after"
-            );
-          }
-        }
-      } catch (e) {
-        console.debug("[RMS] Batch scan failed:", e);
-      }
-    }
   } catch (e) {
     console.error("[RMS] DexScreener injection error:", e);
   } finally {
@@ -119,8 +131,8 @@ const urlObserver = new MutationObserver(() => {
     lastUrl = window.location.href;
     currentMint = null;
     removeAll();
-    // Small delay for SPA content to render
-    setTimeout(injectRiskBadge, 1000);
+    // Delay for SPA content to render
+    setTimeout(injectRiskBadge, 1500);
   }
 });
 
@@ -130,7 +142,18 @@ urlObserver.observe(document.body, { childList: true, subtree: true });
 window.addEventListener("popstate", () => {
   currentMint = null;
   removeAll();
-  setTimeout(injectRiskBadge, 1000);
+  setTimeout(injectRiskBadge, 1500);
+});
+
+// Listen for popup requesting the detected token
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === "GET_PAGE_TOKEN") {
+    // Try to get token from DOM
+    const mint = extractTokenFromDexScreener();
+    const chain = extractChainFromUrl(window.location.href);
+    sendResponse({ mint, chain, url: window.location.href });
+  }
+  return false;
 });
 
 } // end __rms_guard
