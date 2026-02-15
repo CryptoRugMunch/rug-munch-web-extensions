@@ -59,6 +59,57 @@ export interface BatchScanResponse {
 
 // Rate limiting handled server-side (Valkey)
 
+
+/**
+ * Detect if we're running in a content script (vs popup/background).
+ * Content scripts in MV3 are subject to page CORS — must proxy through background.
+ */
+function isContentScript(): boolean {
+  try {
+    // Test override — force direct fetch in test environment
+    if ((globalThis as any).__RMS_TEST_DIRECT_FETCH) return false;
+    // Content scripts have window.location set to the host page
+    // Background/popup have chrome-extension:// origin
+    return typeof window !== "undefined" &&
+           !window.location.protocol.startsWith("chrome-extension") &&
+           !window.location.protocol.startsWith("moz-extension");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Proxy an API request through the background service worker.
+ * Avoids CORS issues when calling from content scripts.
+ */
+async function proxyViaBackground(
+  path: string,
+  body?: any,
+  method = "POST"
+): Promise<any> {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      { type: "API_PROXY", path, body, method },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message || "Background proxy failed"));
+          return;
+        }
+        if (!response?.success) {
+          reject(new Error(response?.error || "Proxy request failed"));
+          return;
+        }
+        const data = response.data;
+        if (data?.__proxy_error) {
+          reject(new Error(data.detail || `HTTP ${data.status}`));
+          return;
+        }
+        resolve(data);
+      }
+    );
+  });
+}
+
 async function getAuthToken(): Promise<string | null> {
   try {
     const result = await chrome.storage.local.get(["auth_token"]);
@@ -80,27 +131,32 @@ export async function scanToken(mint: string, chain = "solana"): Promise<ExtScan
       return { success: true, data: cached.data, cached: true };
     }
 
-    const token = await getAuthToken();
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (token) headers["Authorization"] = `Bearer ${token}`;
+    let data: ScanResult;
 
-    const baseUrl = await getApiBaseUrl();
-    const resp = await fetch(`${baseUrl}/ext/scan`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ token_address: mint, chain }),
-    });
+    if (isContentScript()) {
+      // Content scripts must proxy through background to avoid CORS
+      data = await proxyViaBackground("/ext/scan", { token_address: mint, chain });
+    } else {
+      const token = await getAuthToken();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
 
+      const baseUrl = await getApiBaseUrl();
+      const resp = await fetch(`${baseUrl}/ext/scan`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ token_address: mint, chain }),
+      });
 
-    if (!resp.ok) {
-      // Return stale cache if available
-      if (cached) return { success: true, data: cached.data, cached: true };
-      const err = await resp.json().catch(() => ({}));
-      return { success: false, cached: false, error: err.detail || `HTTP ${resp.status}` };
+      if (!resp.ok) {
+        // Return stale cache if available
+        if (cached) return { success: true, data: cached.data, cached: true };
+        const err = await resp.json().catch(() => ({}));
+        return { success: false, cached: false, error: err.detail || `HTTP ${resp.status}` };
+      }
+
+      data = await resp.json();
     }
-
-    // The API returns the ScanResult directly (not wrapped)
-    const data: ScanResult = await resp.json();
 
     // Store in IndexedDB (only if we got real data)
     if (!data.not_scanned) {

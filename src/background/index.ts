@@ -371,3 +371,53 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     // Expected to fail sometimes (e.g. restricted pages, permissions not granted)
   });
 });
+
+// ─── API Proxy for Content Scripts ───────────────────────────────────
+// Content scripts in MV3 are subject to the PAGE's CORS policy.
+// Route all API calls through the background service worker which has
+// extension-level permissions (host_permissions in manifest).
+
+
+async function proxyApiRequest(
+  path: string,
+  options: { method?: string; body?: any; authToken?: string } = {}
+): Promise<any> {
+  const baseUrl = await getApiBase();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (options.authToken) headers["Authorization"] = `Bearer ${options.authToken}`;
+
+  const resp = await fetch(`${baseUrl}${path}`, {
+    method: options.method || "POST",
+    headers,
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    return { __proxy_error: true, status: resp.status, detail: err.detail || `HTTP ${resp.status}` };
+  }
+  return resp.json();
+}
+
+// Add proxy handler to existing message listener — we need a NEW listener
+// since the existing one doesn't return true for async responses.
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === "API_PROXY") {
+    (async () => {
+      try {
+        // Get auth token from storage
+        const { auth_token } = await chrome.storage.local.get("auth_token");
+        const result = await proxyApiRequest(message.path, {
+          method: message.method || "POST",
+          body: message.body,
+          authToken: auth_token || undefined,
+        });
+        sendResponse({ success: true, data: result });
+      } catch (e: any) {
+        sendResponse({ success: false, error: e.message || "Proxy request failed" });
+      }
+    })();
+    return true; // Keep sendResponse channel open for async
+  }
+  return false;
+});

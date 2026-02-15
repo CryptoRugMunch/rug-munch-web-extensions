@@ -1,34 +1,37 @@
 /**
  * MarcusChat — Full-featured Marcus chat in popup (Safari + Chrome + Firefox).
- * 
+ *
  * State persisted in chrome.storage.local so navigating away and back preserves conversation.
  * Receives last scan result + detected CA from parent Popup component.
+ *
+ * v2: Rich json-render ScoreCards inline in chat. Same quality as popup scan view.
  */
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { COLORS } from "../utils/designTokens";
 import { getApiBase } from "../utils/config";
 import { scanToken, type ScanResult } from "../services/api";
-import { riskLabel, riskEmoji } from "../utils/designTokens";
+import { riskEmoji } from "../utils/designTokens";
 import { extractMintFromUrl } from "../utils/shadowInject";
+import { Renderer, ActionProvider } from "@json-render/react";
+import { registry, scanToSpec } from "../ui-catalog";
 
 interface Message {
   role: "user" | "marcus" | "system";
   text: string;
   ts: number;
+  /** If set, render a rich json-render ScoreCard instead of text */
+  scanResult?: ScanResult;
 }
 
 export interface MarcusChatProps {
   onBack: () => void;
-  /** Last scan result from popup main view */
   initialScan?: ScanResult | null;
-  /** CA detected from active tab */
   initialMint?: string | null;
 }
 
 const STORAGE_KEY = "marcus_chat_state";
 
-// Tier-based rate limits (per day — mirrors config.py)
 const TIER_CHAT_LIMITS: Record<string, number> = {
   free: 1, free_linked: 3,
   holder: 3, scout: 10,
@@ -47,61 +50,14 @@ function detectCA(text: string): string | null {
   return null;
 }
 
-function riskBar(score: number | null | undefined): string {
-  if (score == null) return "";
-  const label = riskLabel(score);
-  const emoji = riskEmoji(score);
-  const filled = Math.round(score / 10);
-  const bar = "█".repeat(filled) + "░".repeat(10 - filled);
-  return `${emoji} Risk: ${score}/100 [${bar}] ${label}`;
-}
-
-function formatScanResult(d: ScanResult): string {
-  const lines: string[] = [];
-  const sym = d.token_symbol || "???";
-  const name = d.token_name || "Unknown";
-  lines.push(`🔍 ${name} ($${sym})`);
-  lines.push(riskBar(d.risk_score));
-  lines.push("");
-
-  if (d.price_usd) lines.push(`💰 Price: $${d.price_usd}`);
-  if (d.market_cap) lines.push(`📊 MCap: $${Number(d.market_cap).toLocaleString()}`);
-  if (d.liquidity_usd) lines.push(`💧 Liquidity: $${Number(d.liquidity_usd).toLocaleString()}`);
-
-  const flags: string[] = [];
-  const da = d as any;
-  if (da.freeze_authority_enabled === false) flags.push("✅ Freeze Revoked");
-  if (da.freeze_authority_enabled === true) flags.push("⚠️ Freeze Active");
-  if (da.mint_authority_enabled === false) flags.push("✅ Mint Revoked");
-  if (da.mint_authority_enabled === true) flags.push("⚠️ Mint Active");
-  if (flags.length) { lines.push(""); lines.push(flags.join(" | ")); }
-
-  const score = d.risk_score;
-  if (score != null) {
-    const key = score >= 75 ? "critical" : score >= 50 ? "high" : score >= 25 ? "moderate" : "low";
-    const verdicts: Record<string, string> = {
-      critical: "\n🔴 CRITICAL RISK — *\"If it is not right, do not do it.\"* Stay away.",
-      high: "\n⚠️ HIGH RISK — Proceed with extreme caution.",
-      moderate: "\n🟡 Moderate risk. DYOR.",
-      low: "\n🟢 Low risk indicators, but stay vigilant.",
-    };
-    lines.push(verdicts[key]);
-  }
-
-  return lines.join("\n");
-}
-
 /** Simple markdown-ish formatting for chat messages */
 function formatText(text: string): React.ReactNode {
-  // Split on newlines, then process inline formatting
   const lines = text.split("\n");
   return lines.map((line, i) => {
-    // Process bold **text** and *text*
     const parts: React.ReactNode[] = [];
     let remaining = line;
     let key = 0;
-    
-    // Bold: **text**
+
     while (remaining.includes("**")) {
       const start = remaining.indexOf("**");
       const end = remaining.indexOf("**", start + 2);
@@ -110,14 +66,17 @@ function formatText(text: string): React.ReactNode {
       parts.push(<strong key={`b${key++}`}>{remaining.slice(start + 2, end)}</strong>);
       remaining = remaining.slice(end + 2);
     }
-    
-    // Code: `text`
+
     if (remaining.includes("`")) {
       const result: React.ReactNode[] = [];
       const segments = remaining.split("`");
       segments.forEach((seg, j) => {
         if (j % 2 === 1) {
-          result.push(<code key={`c${key++}`} style={{ backgroundColor: "rgba(126,76,255,0.2)", padding: "1px 4px", borderRadius: 3, fontSize: "0.9em" }}>{seg}</code>);
+          result.push(
+            <code key={`c${key++}`} style={{ backgroundColor: "rgba(126,76,255,0.2)", padding: "1px 4px", borderRadius: 3, fontSize: "0.9em" }}>
+              {seg}
+            </code>
+          );
         } else {
           result.push(seg);
         }
@@ -126,9 +85,9 @@ function formatText(text: string): React.ReactNode {
       else parts.push(...result);
       remaining = "";
     }
-    
+
     if (remaining) parts.push(remaining);
-    
+
     return (
       <React.Fragment key={i}>
         {parts.length > 0 ? parts : line}
@@ -137,6 +96,71 @@ function formatText(text: string): React.ReactNode {
     );
   });
 }
+
+/**
+ * Detect token from the active tab by asking the content script.
+ * Falls back to URL extraction.
+ */
+async function detectTokenFromActiveTab(): Promise<{ mint: string; chain: string } | null> {
+  return new Promise((resolve) => {
+    try {
+      chrome.tabs?.query({ active: true, currentWindow: true }, (tabs) => {
+        const tab = tabs?.[0];
+        if (!tab?.id || !tab.url) {
+          // Fallback to URL extraction
+          if (tab?.url) {
+            const mint = extractMintFromUrl(tab.url);
+            if (mint) return resolve({ mint, chain: "solana" });
+          }
+          return resolve(null);
+        }
+
+        // Ask content script for the real token (handles DexScreener pair→mint)
+        chrome.tabs.sendMessage(tab.id, { type: "GET_PAGE_TOKEN" }, (response) => {
+          if (chrome.runtime.lastError || !response?.mint) {
+            // Content script didn't respond — try URL extraction
+            const mint = extractMintFromUrl(tab.url!);
+            return resolve(mint ? { mint, chain: "solana" } : null);
+          }
+          resolve({ mint: response.mint, chain: response.chain || "solana" });
+        });
+      });
+    } catch {
+      resolve(null);
+    }
+
+    // Timeout after 2s
+    setTimeout(() => resolve(null), 2000);
+  });
+}
+
+/** ScoreCard rendered inline in chat bubble */
+const InlineScanCard: React.FC<{ data: ScanResult }> = ({ data }) => {
+  const spec = scanToSpec(data, { showActions: true, showBreakdown: true });
+
+  const handlers: Record<string, () => void> = {
+    copy_address: () => navigator.clipboard.writeText(data.token_address),
+    open_explorer: () => {
+      const chain = data.chain || "solana";
+      const url = chain === "solana"
+        ? `https://solscan.io/token/${data.token_address}`
+        : `https://etherscan.io/token/${data.token_address}`;
+      window.open(url, "_blank");
+    },
+    share_result: () => {
+      const text = `${riskEmoji(data.risk_score ?? 0)} $${data.token_symbol || "?"} Risk: ${data.risk_score ?? "?"}/100\nScanned by Rug Munch Intelligence 🗿`;
+      navigator.clipboard.writeText(text);
+    },
+  };
+
+  return (
+    <div style={{ margin: "4px 0", maxWidth: "100%" }}>
+      <ActionProvider handlers={handlers}>
+        <Renderer spec={spec as any} registry={registry} />
+      </ActionProvider>
+    </div>
+  );
+};
 
 const MarcusChat: React.FC<MarcusChatProps> = ({ onBack, initialScan, initialMint }) => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -162,33 +186,30 @@ const MarcusChat: React.FC<MarcusChatProps> = ({ onBack, initialScan, initialMin
         setAuthToken(data.auth_token || null);
 
         const saved = data[STORAGE_KEY];
-        if (saved) {
-          // Only restore if saved within last 30 minutes
-          const age = Date.now() - (saved.savedAt || 0);
-          if (age < 30 * 60 * 1000) {
-            setMessages(saved.messages || []);
-            setMsgCount(saved.msgCount || 0);
-            if (saved.detectedMint) setDetectedMint(saved.detectedMint);
-            if (saved.lastScan) setLastScan(saved.lastScan);
-            setLoaded(true);
-            return;
-          }
+        if (saved && Date.now() - (saved.savedAt || 0) < 30 * 60 * 1000) {
+          setMessages(saved.messages || []);
+          setMsgCount(saved.msgCount || 0);
+          if (saved.detectedMint) setDetectedMint(saved.detectedMint);
+          if (saved.lastScan) setLastScan(saved.lastScan);
+          setLoaded(true);
+          return;
         }
 
-        // No saved state or expired — start fresh
+        // Fresh session
         const initial: Message[] = [
           { role: "marcus", text: "Ave, citizen. Paste a CA or ask about token safety. 🗿", ts: Date.now() },
         ];
 
-        // If parent passed a scan result, show it
         if (initialScan && initialScan.risk_score != null) {
           setLastScan(initialScan);
           const ca = initialScan.token_address || initialMint;
           if (ca) setDetectedMint(ca);
+          // Show rich ScoreCard for initial scan
           initial.push({
-            role: "system",
-            text: `📍 Loaded scan: ${initialScan.token_name || initialScan.token_symbol || ca} (Risk: ${initialScan.risk_score}/100)`,
+            role: "marcus",
+            text: "", // Text is ignored when scanResult is set
             ts: Date.now(),
+            scanResult: initialScan,
           });
         } else if (initialMint) {
           setDetectedMint(initialMint);
@@ -204,34 +225,27 @@ const MarcusChat: React.FC<MarcusChatProps> = ({ onBack, initialScan, initialMin
       }
     );
 
-    // Auto-detect CA from active tab URL
+    // Detect token from active tab (works for DexScreener + all platforms)
     if (!initialMint) {
-      try {
-        chrome.tabs?.query({ active: true, currentWindow: true }, (tabs) => {
-          if (tabs?.[0]?.url) {
-            const mint = extractMintFromUrl(tabs[0].url);
-            if (mint) {
-              setDetectedMint(mint);
-              setMessages(prev => [...prev, {
-                role: "system" as const,
-                text: `📍 Detected CA from tab: ${mint}`,
-                ts: Date.now(),
-              }]);
-            }
-          }
-        });
-      } catch { /* Extension API may not be available in all contexts */ }
+      detectTokenFromActiveTab().then((result) => {
+        if (result?.mint) {
+          setDetectedMint(result.mint);
+          setMessages(prev => [...prev, {
+            role: "system" as const,
+            text: `📍 Detected CA from tab: ${result.mint}`,
+            ts: Date.now(),
+          }]);
+        }
+      });
     }
   }, [initialScan, initialMint]);
 
-
-
-  // Persist state on every change
+  // Persist state on every change (exclude scanResult objects to keep storage small)
   useEffect(() => {
     if (!loaded) return;
     chrome.storage?.local?.set({
       [STORAGE_KEY]: {
-        messages,
+        messages: messages.map(m => ({ ...m, scanResult: undefined })), // Don't persist full scan objects
         msgCount,
         detectedMint,
         lastScan,
@@ -242,18 +256,18 @@ const MarcusChat: React.FC<MarcusChatProps> = ({ onBack, initialScan, initialMin
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
-  const addMessage = useCallback((role: "user" | "marcus" | "system", text: string) => {
-    setMessages(prev => [...prev, { role, text, ts: Date.now() }]);
+  const addMessage = useCallback((msg: Omit<Message, "ts">) => {
+    setMessages(prev => [...prev, { ...msg, ts: Date.now() }]);
   }, []);
 
-  // Listen for tab URL changes (detect new CAs when user navigates)
+  // Listen for tab URL changes
   useEffect(() => {
     const handler = (_tabId: number, info: chrome.tabs.TabChangeInfo) => {
       if (info.url) {
         const mint = extractMintFromUrl(info.url);
         if (mint && mint !== detectedMint) {
           setDetectedMint(mint);
-          addMessage("system", `📍 New CA detected: ${mint}`);
+          addMessage({ role: "system", text: `📍 New CA detected: ${mint}` });
         }
       }
     };
@@ -265,7 +279,7 @@ const MarcusChat: React.FC<MarcusChatProps> = ({ onBack, initialScan, initialMin
     const text = input.trim();
     if (!text || loading) return;
 
-    addMessage("user", text);
+    addMessage({ role: "user", text });
     setInput("");
     setLoading(true);
     setMsgCount(c => c + 1);
@@ -275,23 +289,26 @@ const MarcusChat: React.FC<MarcusChatProps> = ({ onBack, initialScan, initialMin
       const ca = detectCA(text) || (text.toLowerCase().startsWith("scan") ? detectedMint : null);
 
       if (ca) {
-        addMessage("system", `⏳ Scanning ${ca}`);
+        addMessage({ role: "system", text: `⏳ Scanning ${ca}` });
         const resp = await scanToken(ca);
         const result = resp?.data || null;
         if (result && result.risk_score != null) {
           setLastScan(result);
           setDetectedMint(ca);
-          addMessage("marcus", formatScanResult(result));
+          // Rich ScoreCard in chat — same as popup main view
+          addMessage({ role: "marcus", text: "", scanResult: result });
         } else {
-          addMessage("marcus", `❓ Couldn't analyze that token. Try via @rug_munchy_bot on Telegram.`);
+          addMessage({ role: "marcus", text: "❓ Couldn't analyze that token. Try via @rug_munchy_bot on Telegram." });
         }
       } else {
         // LLM chat
         if (!authToken) {
-          addMessage("marcus", lastScan
-            ? `Based on the last scan, risk is ${lastScan.risk_score}/100. Link your account in Settings for full Marcus chat. 🗿`
-            : "Paste a contract address and I'll analyze it. Link your account in Settings for full Marcus chat. 🗿"
-          );
+          addMessage({
+            role: "marcus",
+            text: lastScan
+              ? `Based on the last scan, risk is ${lastScan.risk_score}/100. Link your account in Settings for full Marcus chat. 🗿`
+              : "Paste a contract address and I'll analyze it. Link your account in Settings for full Marcus chat. 🗿",
+          });
         } else {
           try {
             const base = await getApiBase();
@@ -318,29 +335,29 @@ const MarcusChat: React.FC<MarcusChatProps> = ({ onBack, initialScan, initialMin
             });
 
             if (resp.status === 403) {
-              addMessage("marcus", "🔒 Chat requires a linked account. Link Telegram via Settings. 🗿");
+              addMessage({ role: "marcus", text: "🔒 Chat requires a linked account. Link Telegram via Settings. 🗿" });
             } else if (resp.status === 429) {
-              addMessage("marcus", "⏳ Daily limit reached. Come back tomorrow. 🗿");
+              addMessage({ role: "marcus", text: "⏳ Daily limit reached. Come back tomorrow. 🗿" });
             } else if (resp.ok) {
               const data = await resp.json();
-              addMessage("marcus", data.response || "No response from Marcus.");
+              addMessage({ role: "marcus", text: data.response || "No response from Marcus." });
             } else {
-              addMessage("marcus", "*stares stoically* Something went wrong. Try again, citizen.");
+              addMessage({ role: "marcus", text: "*stares stoically* Something went wrong. Try again, citizen." });
             }
           } catch {
-            addMessage("marcus", "*stares stoically* Connection failed. Check your network and try again.");
+            addMessage({ role: "marcus", text: "*stares stoically* Connection failed. Check your network and try again." });
           }
         }
       }
     } catch (e: any) {
-      addMessage("marcus", `⚠️ ${e.message || "Something went wrong"}`);
+      addMessage({ role: "marcus", text: `⚠️ ${e.message || "Something went wrong"}` });
     } finally {
       setLoading(false);
       inputRef.current?.focus();
     }
   }, [input, loading, authToken, lastScan, detectedMint, messages, addMessage]);
 
-  if (!loaded) return null; // Don't flash empty state while loading
+  if (!loaded) return null;
 
   return (
     <div style={{
@@ -361,14 +378,15 @@ const MarcusChat: React.FC<MarcusChatProps> = ({ onBack, initialScan, initialMin
         <span style={{ fontSize: 18 }}>🗿</span>
         <div>
           <div style={{ fontWeight: 700, fontSize: 14 }}>Marcus</div>
-          <div style={{ fontSize: 10, color: COLORS.purple, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200 }}>
+          <div style={{
+            fontSize: 10, color: COLORS.purple, overflow: "hidden",
+            textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200,
+          }}>
             {loading ? "Analyzing..." : detectedMint ? `CA: ${detectedMint}` : "Stoic Crypto Analyst"}
           </div>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ fontSize: 9, color: COLORS.textMuted }}>
-            {msgCount}/{msgLimit}
-          </span>
+          <span style={{ fontSize: 9, color: COLORS.textMuted }}>{msgCount}/{msgLimit}</span>
           <div style={{
             width: 6, height: 6, borderRadius: 3,
             backgroundColor: loading ? COLORS.gold : COLORS.green,
@@ -397,10 +415,12 @@ const MarcusChat: React.FC<MarcusChatProps> = ({ onBack, initialScan, initialMin
               </div>
             )}
             <div style={{
-              maxWidth: m.role === "system" ? "100%" : "80%",
-              borderRadius: 12, padding: m.role === "system" ? "4px 8px" : "8px 10px",
+              maxWidth: m.role === "system" ? "100%" : "92%",
+              borderRadius: 12,
+              padding: m.scanResult ? "4px" : m.role === "system" ? "4px 8px" : "8px 10px",
               fontSize: m.role === "system" ? 11 : 13, lineHeight: 1.5,
-              whiteSpace: "pre-wrap", wordBreak: "break-word",
+              whiteSpace: m.scanResult ? "normal" : "pre-wrap",
+              wordBreak: "break-word",
               ...(m.role === "system"
                 ? { color: COLORS.textMuted, fontStyle: "italic" as const, textAlign: "center" as const, width: "100%" }
                 : m.role === "marcus"
@@ -408,8 +428,12 @@ const MarcusChat: React.FC<MarcusChatProps> = ({ onBack, initialScan, initialMin
                   : { backgroundColor: `${COLORS.purple}20`, color: "#fff", border: `1px solid ${COLORS.purple}30`, borderTopRightRadius: 4 }
               ),
             }}>
-              {formatText(m.text)}
-              {m.role !== "system" && (
+              {m.scanResult ? (
+                <InlineScanCard data={m.scanResult} />
+              ) : (
+                formatText(m.text)
+              )}
+              {m.role !== "system" && !m.scanResult && (
                 <div style={{ fontSize: 9, marginTop: 4, opacity: 0.4 }}>
                   {new Date(m.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                 </div>
@@ -454,7 +478,7 @@ const MarcusChat: React.FC<MarcusChatProps> = ({ onBack, initialScan, initialMin
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") send(); }}
-            placeholder={detectedMint ? `Ask about ${detectedMint} or paste CA` : "Paste CA or ask Marcus..."}
+            placeholder={detectedMint ? `Ask about ${detectedMint.slice(0, 8)}… or paste CA` : "Paste CA or ask Marcus..."}
             disabled={loading}
             style={{
               flex: 1, padding: "8px 10px", borderRadius: 10,

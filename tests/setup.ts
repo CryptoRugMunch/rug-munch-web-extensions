@@ -1,3 +1,6 @@
+// Force direct fetch (not content script proxy) in tests
+(globalThis as any).__RMS_TEST_DIRECT_FETCH = true;
+
 /**
  * Test setup — mock chrome extension APIs.
  * These don't exist in Node/jsdom, so we stub them.
@@ -63,4 +66,33 @@ const listeners: Array<(changes: any, area: string) => void> = [];
   contextMenus: { create: (_opts: any) => {}, onClicked: { addListener: (_fn: any) => {} } },
   alarms: { create: (_name: any, _opts: any) => {}, onAlarm: { addListener: (_fn: any) => {} } },
   scripting: { executeScript: async (_opts: any) => {} },
+};
+
+
+// Mock IndexedDB (jsdom doesn't provide it)
+// Use synchronous-ish mock that resolves immediately via queueMicrotask
+(globalThis as any).indexedDB = {
+  open: (_name: string, _version?: number) => {
+    const mockDB = {
+      transaction: () => ({
+        objectStore: () => ({
+          get: (_key: any) => {
+            const req: any = { result: null };
+            queueMicrotask(() => req.onsuccess?.());
+            return req;
+          },
+          put: (_data: any) => {
+            const req: any = {};
+            queueMicrotask(() => req.onsuccess?.());
+            return req;
+          },
+        }),
+      }),
+      objectStoreNames: { contains: () => true },
+      createObjectStore: () => ({}),
+    };
+    const req: any = { result: mockDB };
+    queueMicrotask(() => req.onsuccess?.());
+    return req;
+  },
 };
