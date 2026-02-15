@@ -16,7 +16,8 @@ const path = require("path");
 const distChrome = path.join(__dirname, "..", "dist");
 const distFirefox = path.join(__dirname, "..", "dist-firefox");
 
-// Copy entire dist to dist-firefox
+// Clean old build and copy fresh
+if (fs.existsSync(distFirefox)) fs.rmSync(distFirefox, { recursive: true });
 fs.cpSync(distChrome, distFirefox, { recursive: true });
 
 // Read and transform manifest
