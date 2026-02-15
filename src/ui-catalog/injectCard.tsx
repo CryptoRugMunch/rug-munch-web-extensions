@@ -8,7 +8,7 @@
 import { createRoot } from "react-dom/client";
 import { createElement } from "react";
 import { registry, scanToCompactSpec, scanToSpec, BRAND_COLORS } from "./index";
-import { Renderer, ActionProvider } from "@json-render/react";
+import { Renderer, ActionProvider, StateProvider } from "@json-render/react";
 import type { ScanResult } from "../services/api";
 
 const C = BRAND_COLORS;
@@ -112,11 +112,14 @@ export function injectScoreCard(
   };
 
   root.render(
-    createElement(ActionProvider, {
-      handlers: actionHandlers,
-      children: createElement(Renderer, {
-        spec: spec as any,
-        registry,
+    createElement(StateProvider, {
+      initialState: {},
+      children: createElement(ActionProvider, {
+        handlers: actionHandlers,
+        children: createElement(Renderer, {
+          spec: spec as any,
+          registry,
+        }),
       }),
     })
   );
