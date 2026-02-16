@@ -4,7 +4,7 @@
  * State persisted in chrome.storage.local so navigating away and back preserves conversation.
  * Receives last scan result + detected CA from parent Popup component.
  *
- * v2: Rich json-render ScoreCards inline in chat. Same quality as popup scan view.
+ * v2: Rich inline scan cards in chat.
  */
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
@@ -13,14 +13,12 @@ import { getApiBase } from "../utils/config";
 import { scanToken, type ScanResult } from "../services/api";
 import { riskEmoji } from "../utils/designTokens";
 import { extractMintFromUrl } from "../utils/shadowInject";
-import { Renderer, JSONUIProvider } from "@json-render/react";
-import { registry, scanToSpec } from "../ui-catalog";
 
 interface Message {
   role: "user" | "marcus" | "system";
   text: string;
   ts: number;
-  /** If set, render a rich json-render ScoreCard instead of text */
+  /** If set, render a rich scan card instead of text */
   scanResult?: ScanResult;
 }
 
@@ -136,28 +134,72 @@ async function detectTokenFromActiveTab(): Promise<{ mint: string; chain: string
 
 /** ScoreCard rendered inline in chat bubble */
 const InlineScanCard: React.FC<{ data: ScanResult }> = ({ data }) => {
-  const spec = scanToSpec(data, { showActions: true, showBreakdown: true });
-
-  const handlers: Record<string, () => void> = {
-    copy_address: () => navigator.clipboard.writeText(data.token_address),
-    open_explorer: () => {
-      const chain = data.chain || "solana";
-      const url = chain === "solana"
-        ? `https://solscan.io/token/${data.token_address}`
-        : `https://etherscan.io/token/${data.token_address}`;
-      window.open(url, "_blank");
-    },
-    share_result: () => {
-      const text = `${riskEmoji(data.risk_score ?? 0)} $${data.token_symbol || "?"} Risk: ${data.risk_score ?? "?"}/100\nScanned by Rug Munch Intelligence 🗿`;
-      navigator.clipboard.writeText(text);
-    },
-  };
+  const score = data.risk_score ?? 0;
+  const color = score >= 75 ? COLORS.red : score >= 50 ? COLORS.orange : score >= 25 ? COLORS.gold : COLORS.green;
 
   return (
-    <div style={{ margin: "4px 0", maxWidth: "100%" }}>
-      <JSONUIProvider registry={registry} initialState={{}} handlers={handlers}>
-        <Renderer spec={spec as any} registry={registry} />
-      </JSONUIProvider>
+    <div style={{
+      margin: "4px 0", padding: 10, borderRadius: 8,
+      backgroundColor: COLORS.bgCard, border: `1px solid ${color}40`,
+      fontSize: 12,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <div>
+          <span style={{ fontWeight: 700 }}>${data.token_symbol || "?"}</span>
+          <span style={{ color: COLORS.textMuted, fontSize: 10, marginLeft: 4 }}>{data.token_name}</span>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <span style={{ fontSize: 16, fontWeight: 800, color }}>{riskEmoji(score)}</span>
+          <span style={{ fontSize: 11, color, fontWeight: 600, marginLeft: 4 }}>{score}/100</span>
+        </div>
+      </div>
+
+      {/* Risk bar */}
+      <div style={{ width: "100%", height: 4, backgroundColor: COLORS.border, borderRadius: 2, marginBottom: 6 }}>
+        <div style={{ width: `${score}%`, height: "100%", backgroundColor: color, borderRadius: 2 }} />
+      </div>
+
+      {/* Metrics */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, fontSize: 10 }}>
+        <div><span style={{ color: COLORS.textMuted }}>Price: </span><span>{data.price_usd ? `$${data.price_usd < 0.01 ? data.price_usd.toFixed(8) : data.price_usd.toFixed(4)}` : "—"}</span></div>
+        <div><span style={{ color: COLORS.textMuted }}>MCap: </span><span>{data.market_cap ? (data.market_cap >= 1e6 ? `$${(data.market_cap/1e6).toFixed(1)}M` : `$${(data.market_cap/1e3).toFixed(1)}K`) : "—"}</span></div>
+        <div><span style={{ color: COLORS.textMuted }}>Liq: </span><span>{data.liquidity_usd ? (data.liquidity_usd >= 1e6 ? `$${(data.liquidity_usd/1e6).toFixed(1)}M` : `$${(data.liquidity_usd/1e3).toFixed(1)}K`) : "—"}</span></div>
+        <div><span style={{ color: COLORS.textMuted }}>Holders: </span><span>{data.holder_count?.toLocaleString() || "—"}</span></div>
+      </div>
+
+      {/* Risk factors */}
+      {data.risk_factors && data.risk_factors.length > 0 && (
+        <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px solid ${COLORS.border}` }}>
+          {data.risk_factors.slice(0, 3).map((f, i) => (
+            <div key={i} style={{ fontSize: 10, color: COLORS.orange }}>⚠️ {f}</div>
+          ))}
+        </div>
+      )}
+
+      {/* Actions */}
+      <div style={{ display: "flex", gap: 4, marginTop: 6, paddingTop: 6, borderTop: `1px solid ${COLORS.border}` }}>
+        <button onClick={() => navigator.clipboard.writeText(data.token_address)}
+          style={{ flex: 1, padding: "4px 0", borderRadius: 4, border: `1px solid ${COLORS.border}`, backgroundColor: "transparent", color: COLORS.textSecondary, fontSize: 9, cursor: "pointer" }}>
+          📋 Copy CA
+        </button>
+        <button onClick={() => window.open(`https://solscan.io/token/${data.token_address}`, "_blank")}
+          style={{ flex: 1, padding: "4px 0", borderRadius: 4, border: `1px solid ${COLORS.border}`, backgroundColor: "transparent", color: COLORS.textSecondary, fontSize: 9, cursor: "pointer" }}>
+          🔍 Explorer
+        </button>
+        <button onClick={() => {
+          const text = `${riskEmoji(score)} $${data.token_symbol || "?"} Risk: ${score}/100\nScanned by Rug Munch Intelligence 🗿`;
+          navigator.clipboard.writeText(text);
+        }}
+          style={{ flex: 1, padding: "4px 0", borderRadius: 4, border: `1px solid ${COLORS.border}`, backgroundColor: "transparent", color: COLORS.textSecondary, fontSize: 9, cursor: "pointer" }}>
+          📤 Share
+        </button>
+      </div>
+
+      {/* Full address */}
+      <div style={{ marginTop: 4, fontSize: 8, fontFamily: "monospace", color: COLORS.textMuted, wordBreak: "break-all" as const, cursor: "pointer" }}
+        onClick={() => navigator.clipboard.writeText(data.token_address)}>
+        {data.token_address}
+      </div>
     </div>
   );
 };
