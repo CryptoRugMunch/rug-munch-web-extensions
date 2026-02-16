@@ -2,7 +2,7 @@
  * Upgrade — Full tier system with SOL/USDC payment + CRM hold tiers.
  *
  * Subscription tiers: Scout, Analyst, Syndicate (pay SOL/USDC)
- * Hold tiers: Holder (100K CRM), Whale (1M CRM), OG (50M CRM)
+ * Hold tiers: Holder (500K CRM), Whale (5M CRM), OG (100M CRM)
  */
 
 import React, { useState, useEffect, useCallback, useRef } from "react";

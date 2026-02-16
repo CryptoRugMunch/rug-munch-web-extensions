@@ -42,7 +42,7 @@ export async function getApiBase(): Promise<string> {
 
 // Account state
 export interface AccountState {
-  tier: "free" | "free_linked" | "holder" | "vip";
+  tier: "free" | "free_linked" | "holder" | "scout" | "whale" | "analyst" | "syndicate" | "og" | "vip";
   telegramId: number | null;
   telegramUsername: string | null;
   linkedAt: string | null;
