@@ -540,9 +540,9 @@ async function callMarcusChat(
 async function getApiBase(): Promise<string> {
   try {
     const result = await chrome.storage.local.get("api_base");
-    return result.api_base || "https://cryptorugmunch.ngrok.app/api";
+    return result.api_base || "https://cryptorugmunch.app/api";
   } catch {
-    return "https://cryptorugmunch.ngrok.app/api";
+    return "https://cryptorugmunch.app/api";
   }
 }
 

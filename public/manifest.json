@@ -27,7 +27,7 @@
     "https://gmgn.ai/*",
     "https://photon-sol.tinyastro.io/*",
     "https://cryptorugmunch.com/*",
-    "https://cryptorugmunch.ngrok.app/*"
+    "https://cryptorugmunch.app/*"
   ],
   "action": {
     "default_popup": "src/popup/index.html",

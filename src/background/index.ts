@@ -144,7 +144,7 @@ chrome.contextMenus?.onClicked?.addListener((info, tab) => {
 // Auto-check entitlements on startup, every 30 min, and after link
 
 const API_BASE_KEY = "api_base";
-const DEFAULT_API_BASE = "https://cryptorugmunch.ngrok.app/api";
+const DEFAULT_API_BASE = "https://cryptorugmunch.app/api";
 
 async function getApiBase(): Promise<string> {
   try {

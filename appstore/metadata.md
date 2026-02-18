@@ -58,7 +58,7 @@ https://cryptorugmunch.com/privacy
 17+ (Unrestricted Web Access — due to crypto content)
 
 ## App Review Notes
-This is a Safari Web Extension that helps users identify potential cryptocurrency scams ("rug pulls") by analyzing token contracts and holder distribution on the Solana blockchain. The extension injects risk badges on supported crypto websites and provides a popup interface for manual token scanning. The extension communicates with our backend API at cryptorugmunch.ngrok.app for token analysis. No user data is sold or shared with third parties.
+This is a Safari Web Extension that helps users identify potential cryptocurrency scams ("rug pulls") by analyzing token contracts and holder distribution on the Solana blockchain. The extension injects risk badges on supported crypto websites and provides a popup interface for manual token scanning. The extension communicates with our backend API at cryptorugmunch.app for token analysis. No user data is sold or shared with third parties.
 
 Test account: Not required — the extension works without login.
 To test: Enable the extension in Safari → Settings → Extensions, then visit dexscreener.com and browse any Solana token page.

@@ -16,7 +16,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   showBadges: true,
   swapWarnings: true,
   compactBadges: false,
-  apiBase: "https://cryptorugmunch.ngrok.app/api",
+  apiBase: "https://cryptorugmunch.app/api",
 };
 
 export async function getSettings(): Promise<ExtensionSettings> {
