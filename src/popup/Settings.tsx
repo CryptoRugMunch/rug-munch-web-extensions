@@ -654,11 +654,11 @@ const TierBadge: React.FC<{ tier: string }> = ({ tier }) => {
   const cfg: Record<string, { label: string; color: string }> = {
     free: { label: "Free", color: COLORS.textMuted },
     free_linked: { label: "Linked", color: COLORS.cyan },
-    holder: { label: "Holder", color: COLORS.gold },
-    scout: { label: "Scout", color: COLORS.cyan },
-    whale: { label: "Whale", color: "#5FDDE7" },
-    analyst: { label: "Analyst", color: COLORS.purple },
-    syndicate: { label: "Syndicate", color: "#E7C55F" },
+    holder: { label: "Pro", color: COLORS.gold },
+    scout: { label: "Pro", color: COLORS.cyan },
+    whale: { label: "Pro", color: "#5FDDE7" },
+    analyst: { label: "Team", color: COLORS.purple },
+    syndicate: { label: "Team", color: "#E7C55F" },
     og: { label: "OG", color: "#FFD700" },
     vip: { label: "VIP", color: COLORS.purple },
   };
