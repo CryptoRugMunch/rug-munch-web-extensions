@@ -1,8 +1,10 @@
 /**
- * Upgrade — Full tier system with SOL/USDC payment + CRM hold tiers.
+ * Upgrade — SOL/USDC payment for tier upgrades.
  *
- * Subscription tiers: Scout, Analyst, Syndicate (pay SOL/USDC)
- * Hold tiers: Holder (500K CRM), Whale (5M CRM), OG (100M CRM)
+ * Pro: $5/mo (0.028 SOL / 5 USDC)
+ * Team: $15/mo (0.083 SOL / 15 USDC)
+ * OG: Invite only
+ * CRM holders (500K+) get 30% discount.
  */
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
@@ -215,7 +217,7 @@ const Upgrade: React.FC<UpgradeProps> = ({ onBack, currentTier }) => {
   }
 
   // ─── Tier Selection ───────────────────────────────────────────
-  const tierOrder = ["holder", "scout", "whale", "analyst", "syndicate", "og"];
+  const tierOrder = ["free", "basic", "analyst", "og"];
   const currentRank = tierOrder.indexOf(currentTier);
 
   return (

@@ -401,7 +401,7 @@ const Settings: React.FC<SettingsProps> = ({ onBack }) => {
             marginTop: 8, padding: 8, borderRadius: 6,
             fontSize: 10, color: COLORS.textMuted, textAlign: "center",
           }}>
-            Scanning works without an account (10 free scans/hr).
+            Scanning works without an account (1 free scan/day).
             Sign in for more scans, alerts, and multi-wallet tracking.
           </div>
         </Section>
